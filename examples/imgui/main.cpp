@@ -18,7 +18,6 @@
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <gli/gli.hpp>
 
 #include <imgui.h>
 
@@ -330,8 +329,8 @@ public:
 
 		pipelineCreateInfo.pVertexInputState = &vertexInputState;
 
-		shaderStages[0] = example->loadShader(ASSET_PATH "shaders/imgui/ui.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-		shaderStages[1] = example->loadShader(ASSET_PATH "shaders/imgui/ui.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+		shaderStages[0] = example->loadShader(getAssetPath() + "shaders/imgui/ui.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+		shaderStages[1] = example->loadShader(getAssetPath() + "shaders/imgui/ui.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device->logicalDevice, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipeline));
 	}
@@ -404,12 +403,10 @@ public:
 			vertexBuffer.destroy();
 			VK_CHECK_RESULT(device->createBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &vertexBuffer, vertexBufferSize));
 			vertexCount = imDrawData->TotalVtxCount;
-			vertexBuffer.unmap();
 			vertexBuffer.map();
 		}
 
 		// Index buffer
-		VkDeviceSize indexSize = imDrawData->TotalIdxCount * sizeof(ImDrawIdx);
 		if ((indexBuffer.buffer == VK_NULL_HANDLE) || (indexCount < imDrawData->TotalIdxCount)) {
 			indexBuffer.unmap();
 			indexBuffer.destroy();
@@ -704,8 +701,8 @@ public:
 
 		pipelineCreateInfo.pVertexInputState = &vertexInputState;
 
-		shaderStages[0] = loadShader(ASSET_PATH "shaders/imgui/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-		shaderStages[1] = loadShader(ASSET_PATH "shaders/imgui/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+		shaderStages[0] = loadShader(getAssetPath() + "shaders/imgui/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+		shaderStages[1] = loadShader(getAssetPath() + "shaders/imgui/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipeline));
 	}
 
@@ -753,9 +750,9 @@ public:
 
 	void loadAssets()
 	{
-		models.models.loadFromFile(ASSET_PATH "models/vulkanscenemodels.dae", vertexLayout, 1.0f, vulkanDevice, queue);
-		models.background.loadFromFile(ASSET_PATH "models/vulkanscenebackground.dae", vertexLayout, 1.0f, vulkanDevice, queue);
-		models.logos.loadFromFile(ASSET_PATH "models/vulkanscenelogos.dae", vertexLayout, 1.0f, vulkanDevice, queue);
+		models.models.loadFromFile(getAssetPath() + "models/vulkanscenemodels.dae", vertexLayout, 1.0f, vulkanDevice, queue);
+		models.background.loadFromFile(getAssetPath() + "models/vulkanscenebackground.dae", vertexLayout, 1.0f, vulkanDevice, queue);
+		models.logos.loadFromFile(getAssetPath() + "models/vulkanscenelogos.dae", vertexLayout, 1.0f, vulkanDevice, queue);
 	}
 
 	void prepareImGui()

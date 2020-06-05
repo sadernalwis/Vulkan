@@ -98,10 +98,10 @@ public:
 	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 	{
 		title = "Instanced mesh rendering";
-		zoom = -18.5f;
-		rotation = { -17.2f, -4.7f, 0.0f };
-		cameraPos = { 5.5f, -1.85f, 0.0f };
-		rotationSpeed = 0.25f;
+		camera.type = Camera::CameraType::lookat;
+		camera.setPosition(glm::vec3(5.5f, -1.85f, -18.5f));
+		camera.setRotation(glm::vec3(-17.2f, -4.7f, 0.0f));
+		camera.setPerspective(60.0f, (float)width / (float)height, 1.0f, 256.0f);
 		settings.overlay = true;
 	}
 
@@ -504,7 +504,7 @@ public:
 			&instanceBuffer.memory));
 
 		// Copy to staging buffer
-		VkCommandBuffer copyCmd = VulkanExampleBase::createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+		VkCommandBuffer copyCmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
 
 		VkBufferCopy copyRegion = { };
 		copyRegion.size = instanceBuffer.size;
@@ -515,7 +515,7 @@ public:
 			1,
 			&copyRegion);
 
-		VulkanExampleBase::flushCommandBuffer(copyCmd, queue, true);
+		vulkanDevice->flushCommandBuffer(copyCmd, queue, true);
 
 		instanceBuffer.descriptor.range = instanceBuffer.size;
 		instanceBuffer.descriptor.buffer = instanceBuffer.buffer;
@@ -544,11 +544,8 @@ public:
 	{
 		if (viewChanged)
 		{
-			uboVS.projection = glm::perspective(glm::radians(60.0f), (float)width / (float)height, 0.1f, 256.0f);
-			uboVS.view = glm::translate(glm::mat4(1.0f), cameraPos + glm::vec3(0.0f, 0.0f, zoom));
-			uboVS.view = glm::rotate(uboVS.view, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-			uboVS.view = glm::rotate(uboVS.view, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-			uboVS.view = glm::rotate(uboVS.view, glm::radians(rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
+			uboVS.projection = camera.matrices.perspective;
+			uboVS.view = camera.matrices.view;
 		}
 
 		if (!paused)

@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include <time.h> 
+#include <time.h>
 #include <vector>
 
 #define GLM_FORCE_RADIANS
@@ -22,6 +22,8 @@
 #include "vulkanexamplebase.h"
 #include "VulkanTexture.hpp"
 #include "VulkanBuffer.hpp"
+#include <ktx.h>
+#include <ktxvulkan.h>
 
 #define ENABLE_VALIDATION false
 
@@ -60,7 +62,7 @@ public:
 			glm::mat4 view;
 		} matrices;
 		// Seperate data for each instance
-		UboInstanceData *instance;		
+		UboInstanceData *instance;
 	} uboVS;
 
 
@@ -81,7 +83,7 @@ public:
 
 	~VulkanExample()
 	{
-		// Clean up used Vulkan resources 
+		// Clean up used Vulkan resources
 		// Note : Inherited destructor cleans up resources stored in base class
 
 		vkDestroyImageView(device, textureArray.view, nullptr);
@@ -104,28 +106,38 @@ public:
 
 	void loadTextureArray(std::string filename, VkFormat format)
 	{
+		ktxResult result;
+		ktxTexture* ktxTexture;
+
 #if defined(__ANDROID__)
 		// Textures are stored inside the apk on Android (compressed)
 		// So they need to be loaded via the asset manager
 		AAsset* asset = AAssetManager_open(androidApp->activity->assetManager, filename.c_str(), AASSET_MODE_STREAMING);
-		assert(asset);
+		if (!asset) {
+			vks::tools::exitFatal("Could not load texture from " + filename + "\n\nThe file may be part of the additional asset pack.\n\nRun \"download_assets.py\" in the repository root to download the latest version.", -1);
+		}
 		size_t size = AAsset_getLength(asset);
 		assert(size > 0);
 
-		void *textureData = malloc(size);
+		ktx_uint8_t *textureData = new ktx_uint8_t[size];
 		AAsset_read(asset, textureData, size);
 		AAsset_close(asset);
-
-		gli::texture2d_array tex2DArray(gli::load((const char*)textureData, size));
+		result = ktxTexture_CreateFromMemory(textureData, size, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxTexture);
+		delete[] textureData;
 #else
-		gli::texture2d_array tex2DArray(gli::load(filename));
+		if (!vks::tools::fileExists(filename)) {
+			vks::tools::exitFatal("Could not load texture from " + filename + "\n\nThe file may be part of the additional asset pack.\n\nRun \"download_assets.py\" in the repository root to download the latest version.", -1);
+		}
+		result = ktxTexture_CreateFromNamedFile(filename.c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxTexture);
 #endif
+		assert(result == KTX_SUCCESS);
 
-		assert(!tex2DArray.empty());
-
-		textureArray.width = tex2DArray.extent().x;
-		textureArray.height = tex2DArray.extent().y;
-		layerCount = tex2DArray.layers();
+		// Get properties required for using and upload texture data from the ktx texture object
+		textureArray.width = ktxTexture->baseWidth;
+		textureArray.height = ktxTexture->baseHeight;
+		layerCount = ktxTexture->numLayers;
+		ktx_uint8_t *ktxTextureData = ktxTexture_GetData(ktxTexture);
+		ktx_size_t ktxTextureSize = ktxTexture_GetSize(ktxTexture);
 
 		VkMemoryAllocateInfo memAllocInfo = vks::initializers::memoryAllocateInfo();
 		VkMemoryRequirements memReqs;
@@ -135,7 +147,7 @@ public:
 		VkDeviceMemory stagingMemory;
 
 		VkBufferCreateInfo bufferCreateInfo = vks::initializers::bufferCreateInfo();
-		bufferCreateInfo.size = tex2DArray.size();
+		bufferCreateInfo.size = ktxTextureSize;
 		// This buffer is used as a transfer source for the buffer copy
 		bufferCreateInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 		bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -155,29 +167,30 @@ public:
 		// Copy texture data into staging buffer
 		uint8_t *data;
 		VK_CHECK_RESULT(vkMapMemory(device, stagingMemory, 0, memReqs.size, 0, (void **)&data));
-		memcpy(data, tex2DArray.data(), tex2DArray.size());
+		memcpy(data, ktxTextureData, ktxTextureSize);
 		vkUnmapMemory(device, stagingMemory);
 
 		// Setup buffer copy regions for array layers
 		std::vector<VkBufferImageCopy> bufferCopyRegions;
-		size_t offset = 0;
 
+		// To keep this simple, we will only load layers and no mip level
 		for (uint32_t layer = 0; layer < layerCount; layer++)
 		{
+			// Calculate offset into staging buffer for the current array layer
+			ktx_size_t offset;
+			KTX_error_code ret = ktxTexture_GetImageOffset(ktxTexture, 0, layer, 0, &offset);
+			assert(ret == KTX_SUCCESS);
+			// Setup a buffer image copy structure for the current array layer
 			VkBufferImageCopy bufferCopyRegion = {};
 			bufferCopyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 			bufferCopyRegion.imageSubresource.mipLevel = 0;
 			bufferCopyRegion.imageSubresource.baseArrayLayer = layer;
 			bufferCopyRegion.imageSubresource.layerCount = 1;
-			bufferCopyRegion.imageExtent.width = static_cast<uint32_t>(tex2DArray[layer][0].extent().x);
-			bufferCopyRegion.imageExtent.height = static_cast<uint32_t>(tex2DArray[layer][0].extent().y);
+			bufferCopyRegion.imageExtent.width = ktxTexture->baseWidth;
+			bufferCopyRegion.imageExtent.height = ktxTexture->baseHeight;
 			bufferCopyRegion.imageExtent.depth = 1;
 			bufferCopyRegion.bufferOffset = offset;
-
 			bufferCopyRegions.push_back(bufferCopyRegion);
-
-			// Increase offset into staging buffer for next level / face
-			offset += tex2DArray[layer][0].size();
 		}
 
 		// Create optimal tiled target image
@@ -203,7 +216,7 @@ public:
 		VK_CHECK_RESULT(vkAllocateMemory(device, &memAllocInfo, nullptr, &textureArray.deviceMemory));
 		VK_CHECK_RESULT(vkBindImageMemory(device, textureArray.image, textureArray.deviceMemory, 0));
 
-		VkCommandBuffer copyCmd = VulkanExampleBase::createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+		VkCommandBuffer copyCmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
 
 		// Image barrier for optimal image (target)
 		// Set initial layout for all array layers (faces) of the optimal (target) tiled texture
@@ -239,7 +252,7 @@ public:
 			textureArray.imageLayout,
 			subresourceRange);
 
-		VulkanExampleBase::flushCommandBuffer(copyCmd, queue, true);
+		vulkanDevice->flushCommandBuffer(copyCmd, queue, true);
 
 		// Create sampler
 		VkSamplerCreateInfo sampler = vks::initializers::samplerCreateInfo();
@@ -271,6 +284,7 @@ public:
 		// Clean up staging resources
 		vkFreeMemory(device, stagingMemory, nullptr);
 		vkDestroyBuffer(device, stagingBuffer, nullptr);
+		ktxTexture_Destroy(ktxTexture);
 	}
 
 	void loadTextures()
@@ -451,7 +465,7 @@ public:
 	{
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
 		VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
-		VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE); 
+		VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
 		VkPipelineColorBlendStateCreateInfo colorBlendStateCI = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
 		VkPipelineDepthStencilStateCreateInfo depthStencilStateCI = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
 		VkPipelineViewportStateCreateInfo viewportStateCI = vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);

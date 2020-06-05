@@ -1,13 +1,15 @@
 # Vulkan C++ examples and demos
 
-A comprehensive collection of open source C++ examples for [Vulkan®](https://www.khronos.org/vulkan/), the new graphics and compute API from Khronos.
+A comprehensive collection of open source C++ examples for [Vulkan®](https://www.khronos.org/vulkan/), the new generation graphics and compute API from Khronos.
 
 [![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=BHXPMV6ZKPH9E)
 
 ## Table of Contents
++ [Official Khronos Vulkan Samples](#Khronossamples)
 + [Cloning](#Cloning)
 + [Assets](#Assets)
 + [Building](#Building)
++ [Shaders](#Shaders)
 + [Examples](#Examples)
     + [Basics](#Basics)
     + [Advanced](#Advanced)
@@ -24,6 +26,13 @@ A comprehensive collection of open source C++ examples for [Vulkan®](https://ww
     + [Misc](#Misc)
 + [Credits and Attributions](#CreditsAttributions)
 
+## <a name="Khronossamples"></a> Official Khronos Vulkan Samples
+
+Khronos recently made an official Vulkan Samples repository available to the public ([press release](https://www.khronos.org/blog/vulkan-releases-unified-samples-repository?utm_source=Khronos%20Blog&utm_medium=Twitter&utm_campaign=Vulkan%20Repository)). 
+
+You can find this repository at https://github.com/KhronosGroup/Vulkan-Samples
+
+As I've been involved with getting the official repository up and running, I'll be mostly contributing to that repository from now, but may still add samples that don't fit there in here and I'll of course continue to maintain these samples.
 
 ## <a name="Cloning"></a> Cloning
 This repository contains submodules for external dependencies, so when doing a fresh clone you need to clone recursively:
@@ -51,6 +60,10 @@ from the root of the repository after cloning or see [this](data/README.md) for 
 The repository contains everything required to compile and build the examples on <img src="./images/windowslogo.png" alt="" height="22px" valign="bottom"> Windows, <img src="./images/linuxlogo.png" alt="" height="24px" valign="bottom"> Linux, <img src="./images/androidlogo.png" alt="" height="24px" valign="bottom"> Android, <img src="./images/applelogo.png" alt="" valign="bottom" height="24px"> iOS and macOS (using MoltenVK) using a C++ compiler that supports C++11.
 
 See [BUILD.md](BUILD.md) for details on how to build for the different platforms.
+
+## <a name="Shaders"></a> Shaders
+
+Vulkan consumes shaders in an intermediate representation called SPIR-V. This makes it possible to use different shader languages by compiling them to that bytecode format. The primary shader language used here is [GLSL](data/shaders) but thanks to an external contribution you'll also find [HLSL](data/hlsl) shader sources.
 
 ## <a name="Examples"></a> Examples
 
@@ -89,15 +102,15 @@ Loads a cube map texture from disk containing six different faces. All faces and
 
 #### [09 - Texture arrays](examples/texturearray/)
 
-Loads a 2D texture array containing multiple 2D texture slices (each with it's own mip chain) and renders multiple meshes each sampling from a different layer of the texture. 2D texture arrays don't do any interpolation between the slices.
+Loads a 2D texture array containing multiple 2D texture slices (each with its own mip chain) and renders multiple meshes each sampling from a different layer of the texture. 2D texture arrays don't do any interpolation between the slices.
 
 #### [10 - 3D textures](examples/texture3d/)
 
 Generates a 3D texture on the cpu (using perlin noise), uploads it to the device and samples it to render an animation. 3D textures store volumetric data and interpolate in all three dimensions.
 
-#### [11 - Model rendering](examples/mesh/)
+#### [11 - glTF scene loading and rendering](examples/gltfscene/)
 
-Loads a 3D model and texture maps from a common file format (using [assimp](https://github.com/assimp/assimp)), uploads the vertex and index buffer data to video memory, sets up a matching vertex layout and renders the 3D model.
+Shows how to load the scene from a [glTF 2.0](https://github.com/KhronosGroup/glTF) file. The structure of the glTF 2.0 scene is converted into data structures required to render the scene with Vulkan.
 
 #### [12 - Input attachments](examples/inputattachments)
 
@@ -105,7 +118,7 @@ Uses input attachments to read framebuffer contents from a previous sub pass at 
 
 #### [13 - Sub passes](examples/subpasses/)
 
-Advanced example that sses sub passes and input attachments to write and read back data from framebuffer attachments (same location only) in single render pass. This is used to implement deferred render composition with added forward transparency in a single pass. 
+Advanced example that uses sub passes and input attachments to write and read back data from framebuffer attachments (same location only) in single render pass. This is used to implement deferred render composition with added forward transparency in a single pass. 
 
 #### [14 - Offscreen rendering](examples/offscreen/)
 
@@ -117,7 +130,7 @@ Implements a simple CPU based particle system. Particle data is stored in host m
 
 #### [16 - Stencil buffer](examples/stencilbuffer/)
 
-Uses the stencil buffer and it's compare functionality for rendering a 3D model with dynamic outlines.
+Uses the stencil buffer and its compare functionality for rendering a 3D model with dynamic outlines.
 
 ### <a name="Advanced"></a> Advanced
 
@@ -239,7 +252,7 @@ Mass-spring based cloth system on the GPU using a compute shader to calculate an
 
 #### [06 - Cull and LOD](examples/computecullandlod/)
 
-Purely GPU based frustum visibility culling and level-of-detail system. A compute shader is used to modify draw commands stored in an indirect draw commands buffer to toggle model visibility and select it's level-of-detail based on camera distance, no calculations have to be done on and synced with the CPU.
+Purely GPU based frustum visibility culling and level-of-detail system. A compute shader is used to modify draw commands stored in an indirect draw commands buffer to toggle model visibility and select its level-of-detail based on camera distance, no calculations have to be done on and synced with the CPU.
 
 ### <a name="GeometryShader"></a> Geometry Shader
 
@@ -333,7 +346,9 @@ Demonstrates the use of VK_EXT_conditional_rendering to conditionally dispatch r
 
 #### [06 - Debug markers (VK_EXT_debug_marker)](examples/debugmarker/)
 
-Uses the VK_EXT_debug_marker extension to set debug markers, regions and to name Vulkan objects for advanced debugging in graphics debuggers like [RenderDoc](https://www.renderdoc.org). Details can be found in [this tutorial](https://www.saschawillems.de/tutorials/vulkan/vk_ext_debug_marker).
+<span style="color:red">This sample is deprecated</span>
+
+An updated version using ```VK_EXT_debug_utils``` along with an in-depth tutorial is available in the [Official Khronos Vulkan Samples repository](https://github.com/KhronosGroup/Vulkan-Samples/blob/master/samples/extensions/debug_utils).
 
 #### [07 - Negative viewport height (VK_KHR_Maintenance1 or Vulkan 1.1)](examples/negativeviewportheight/)
 

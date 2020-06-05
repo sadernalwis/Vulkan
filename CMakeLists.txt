@@ -94,7 +94,8 @@ endif()
 
 
 add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-add_definitions(-std=c++11)
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 file(GLOB SOURCE *.cpp )
 
@@ -127,3 +128,4 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/")
 
 add_subdirectory(base)
 add_subdirectory(examples)
+add_subdirectory(external)

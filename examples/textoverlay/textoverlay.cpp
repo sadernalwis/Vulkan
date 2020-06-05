@@ -64,7 +64,6 @@ private:
 	VkPipeline pipeline;
 	VkRenderPass renderPass;
 	VkCommandPool commandPool;
-	std::vector<VkCommandBuffer> cmdBuffers;
 	std::vector<VkFramebuffer*> frameBuffers;
 	std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
 
@@ -78,6 +77,8 @@ public:
 	enum TextAlign { alignLeft, alignCenter, alignRight };
 
 	bool visible = true;
+
+	std::vector<VkCommandBuffer> cmdBuffers;
 
 	TextOverlay(
 		vks::VulkanDevice *vulkanDevice,
@@ -347,7 +348,7 @@ public:
 			vks::initializers::descriptorImageInfo(
 				sampler,
 				view,
-				VK_IMAGE_LAYOUT_GENERAL);
+				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
 		std::array<VkWriteDescriptorSet, 1> writeDescriptorSets;
 		writeDescriptorSets[0] = vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, &texDescriptor);
@@ -622,24 +623,6 @@ public:
 			VK_CHECK_RESULT(vkEndCommandBuffer(cmdBuffers[i]));
 		}
 	}
-
-	// Submit the text command buffers to a queue
-	// Does a queue wait idle
-	void submit(VkQueue queue, uint32_t bufferindex)
-	{
-		if (!visible)
-		{
-			return;
-		}
-
-		VkSubmitInfo submitInfo = {};
-		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &cmdBuffers[bufferindex];
-
-		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
-		VK_CHECK_RESULT(vkQueueWaitIdle(queue));
-	}
-
 };
 
 /*
@@ -666,7 +649,7 @@ public:
 
 	struct UBOVS {
 		glm::mat4 projection;
-		glm::mat4 model;
+		glm::mat4 modelView;
 		glm::vec4 lightPos = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
 	} uboVS;
 
@@ -679,11 +662,11 @@ public:
 	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 	{
 		title = "Vulkan Example - Text overlay";
-		settings.overlay = false;
 		camera.type = Camera::CameraType::lookat;
 		camera.setPosition(glm::vec3(0.0f, 0.0f, -4.5f));
 		camera.setRotation(glm::vec3(-25.0f, -0.0f, 0.0f));
 		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);
+		settings.overlay = false;
 	}
 
 	~VulkanExample()
@@ -766,7 +749,7 @@ public:
 				{
 					std::stringstream vpos;
 					vpos << std::showpos << x << "/" << y << "/" << z;
-					glm::vec3 projected = glm::project(glm::vec3((float)x, (float)y, (float)z), uboVS.model, uboVS.projection, glm::vec4(0, 0, (float)width, (float)height));
+					glm::vec3 projected = glm::project(glm::vec3((float)x, (float)y, (float)z), uboVS.modelView, uboVS.projection, glm::vec4(0, 0, (float)width, (float)height));
 					textOverlay->addText(vpos.str(), projected.x, projected.y + (y > -1 ? 5.0f : -20.0f), TextOverlay::alignCenter);
 				}
 			}
@@ -779,11 +762,11 @@ public:
 		{
 			ss.str("");
 			ss << std::fixed << std::setprecision(2) << std::showpos;
-			ss << uboVS.model[0][i] << " " << uboVS.model[1][i] << " " << uboVS.model[2][i] << " " << uboVS.model[3][i];
+			ss << uboVS.modelView[0][i] << " " << uboVS.modelView[1][i] << " " << uboVS.modelView[2][i] << " " << uboVS.modelView[3][i];
 			textOverlay->addText(ss.str(), (float)width, 25.0f + (float)i * 20.0f, TextOverlay::alignRight);
 		}
 
-		glm::vec3 projected = glm::project(glm::vec3(0.0f), uboVS.model, uboVS.projection, glm::vec4(0, 0, (float)width, (float)height));
+		glm::vec3 projected = glm::project(glm::vec3(0.0f), uboVS.modelView, uboVS.projection, glm::vec4(0, 0, (float)width, (float)height));
 		textOverlay->addText("Uniform cube", projected.x, projected.y, TextOverlay::alignCenter);
 
 #if defined(__ANDROID__)
@@ -905,10 +888,7 @@ public:
 	void updateUniformBuffers()
 	{
 		uboVS.projection = camera.matrices.perspective;
-		uboVS.model = glm::rotate(glm::mat4(1.0f), glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-		uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-		uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
-		uboVS.model = camera.matrices.view * uboVS.model;
+		uboVS.modelView = camera.matrices.view;
 		memcpy(uniformBuffer.mapped, &uboVS, sizeof(uboVS));
 	}
 
@@ -936,15 +916,19 @@ public:
 	{
 		VulkanExampleBase::prepareFrame();
 
+		std::vector<VkCommandBuffer> commandBuffers = {
+			drawCmdBuffers[currentBuffer]
+		};
+		if (textOverlay->visible) {
+			commandBuffers.push_back(textOverlay->cmdBuffers[currentBuffer]);
+		}
+
 		// Command buffer to be sumitted to the queue
-		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
+		submitInfo.commandBufferCount = static_cast<uint32_t>(commandBuffers.size());
+		submitInfo.pCommandBuffers = commandBuffers.data();
 
 		// Submit to queue
 		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
-
-		// Submit text overlay to queue
-		textOverlay->submit(queue, currentBuffer);
 
 		VulkanExampleBase::submitFrame();
 	}

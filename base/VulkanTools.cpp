@@ -8,6 +8,17 @@
 
 #include "VulkanTools.h"
 
+const std::string getAssetPath()
+{
+#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+	return "";
+#elif defined(VK_EXAMPLE_DATA_DIR)
+	return VK_EXAMPLE_DATA_DIR;
+#else
+	return "./../data/";
+#endif
+}
+
 namespace vks
 {
 	namespace tools
@@ -281,23 +292,6 @@ namespace vks
 		void exitFatal(std::string message, VkResult resultCode)
 		{
 			exitFatal(message, (int32_t)resultCode);
-		}
-
-		std::string readTextFile(const char *fileName)
-		{
-			std::string fileContent;
-			std::ifstream fileStream(fileName, std::ios::in);
-			if (!fileStream.is_open()) {
-				printf("File %s not found\n", fileName);
-				return "";
-			}
-			std::string line = "";
-			while (!fileStream.eof()) {
-				getline(fileStream, line);
-				fileContent.append(line + "\n");
-			}
-			fileStream.close();
-			return fileContent;
 		}
 
 #if defined(__ANDROID__)

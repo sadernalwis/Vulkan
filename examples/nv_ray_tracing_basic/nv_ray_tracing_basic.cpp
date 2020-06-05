@@ -44,6 +44,8 @@ struct GeometryInstance {
 #define INDEX_MISS 1
 #define INDEX_CLOSEST_HIT 2
 
+#define NUM_SHADER_GROUPS 3
+
 class VulkanExample : public VulkanExampleBase
 {
 public:
@@ -183,6 +185,7 @@ public:
 
 		VkAccelerationStructureMemoryRequirementsInfoNV memoryRequirementsInfo{};
 		memoryRequirementsInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_INFO_NV;
+		memoryRequirementsInfo.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_OBJECT_NV;
 		memoryRequirementsInfo.accelerationStructure = bottomLevelAS.accelerationStructure;
 
 		VkMemoryRequirements2 memoryRequirements2{};
@@ -220,6 +223,7 @@ public:
 
 		VkAccelerationStructureMemoryRequirementsInfoNV memoryRequirementsInfo{};
 		memoryRequirementsInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_INFO_NV;
+		memoryRequirementsInfo.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_OBJECT_NV;
 		memoryRequirementsInfo.accelerationStructure = topLevelAS.accelerationStructure;
 
 		VkMemoryRequirements2 memoryRequirements2{};
@@ -244,7 +248,7 @@ public:
 	*/
 	void createScene()
 	{
-		// Setup vertices for a single uv-mapped quad made from two triangles
+		// Setup vertices for a single triangle
 		struct Vertex {
 			float pos[3];
 		};
@@ -336,7 +340,7 @@ public:
 		// Acceleration structure build requires some scratch space to store temporary information
 		VkAccelerationStructureMemoryRequirementsInfoNV memoryRequirementsInfo{};
 		memoryRequirementsInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_INFO_NV;
-		memoryRequirementsInfo.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_OBJECT_NV;
+		memoryRequirementsInfo.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_BUILD_SCRATCH_NV;
 
 		VkMemoryRequirements2 memReqBottomLevelAS;
 		memoryRequirementsInfo.accelerationStructure = bottomLevelAS.accelerationStructure;
@@ -412,7 +416,6 @@ public:
 	VkDeviceSize copyShaderIdentifier(uint8_t* data, const uint8_t* shaderHandleStorage, uint32_t groupIndex) {
 		const uint32_t shaderGroupHandleSize = rayTracingProperties.shaderGroupHandleSize;
 		memcpy(data, shaderHandleStorage + groupIndex * shaderGroupHandleSize, shaderGroupHandleSize);
-		data += shaderGroupHandleSize;
 		return shaderGroupHandleSize;
 	}
 
@@ -421,7 +424,7 @@ public:
 	*/
 	void createShaderBindingTable() {
 		// Create buffer for the shader binding table
-		const uint32_t sbtSize = rayTracingProperties.shaderGroupHandleSize * 3;
+		const uint32_t sbtSize = rayTracingProperties.shaderGroupHandleSize * NUM_SHADER_GROUPS;
 		VK_CHECK_RESULT(vulkanDevice->createBuffer(
 			VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
@@ -431,10 +434,9 @@ public:
 
 		auto shaderHandleStorage = new uint8_t[sbtSize];
 		// Get shader identifiers
-		VK_CHECK_RESULT(vkGetRayTracingShaderGroupHandlesNV(device, pipeline, 0, 3, sbtSize, shaderHandleStorage));
+		VK_CHECK_RESULT(vkGetRayTracingShaderGroupHandlesNV(device, pipeline, 0, NUM_SHADER_GROUPS, sbtSize, shaderHandleStorage));
 		auto* data = static_cast<uint8_t*>(shaderBindingTable.mapped);
 		// Copy the shader identifiers to the shader binding table
-		VkDeviceSize offset = 0;
 		data += copyShaderIdentifier(data, shaderHandleStorage, INDEX_RAYGEN);
 		data += copyShaderIdentifier(data, shaderHandleStorage, INDEX_MISS);
 		data += copyShaderIdentifier(data, shaderHandleStorage, INDEX_CLOSEST_HIT);
@@ -540,7 +542,7 @@ public:
 		/*
 			Setup ray tracing shader groups
 		*/
-		std::array<VkRayTracingShaderGroupCreateInfoNV, 3> groups{};
+		std::array<VkRayTracingShaderGroupCreateInfoNV, NUM_SHADER_GROUPS> groups{};
 		for (auto& group : groups) {
 			// Init all groups with some default values
 			group.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_NV;

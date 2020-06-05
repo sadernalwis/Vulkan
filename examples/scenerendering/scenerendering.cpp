@@ -313,6 +313,8 @@ private:
 			bool hasColor = aMesh->HasVertexColors(0);
 			bool hasNormals = aMesh->HasNormals();
 
+			const uint32_t vertexOffset = static_cast<uint32_t>(vertices.size());
+
 			for (uint32_t v = 0; v < aMesh->mNumVertices; v++)
 			{
 				Vertex vertex;
@@ -330,7 +332,7 @@ private:
 			{
 				for (uint32_t j = 0; j < 3; j++)
 				{
-					indices.push_back(aMesh->mFaces[f].mIndices[j]);
+					indices.push_back(vertexOffset + aMesh->mFaces[f].mIndices[j]);
 				}
 			}
 
@@ -584,11 +586,11 @@ public:
 	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 	{
 		title = "Multi-part scene rendering";
-		rotationSpeed = 0.5f;
 		camera.type = Camera::CameraType::firstperson;
 		camera.movementSpeed = 7.5f;
 		camera.position = { 15.0f, -13.5f, 0.0f };
 		camera.setRotation(glm::vec3(5.0f, 90.0f, 0.0f));
+		camera.setRotationSpeed(0.5f);
 		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);
 		settings.overlay = true;
 	}
@@ -820,7 +822,7 @@ public:
 
 	void loadScene()
 	{
-		VkCommandBuffer copyCmd = VulkanExampleBase::createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
+		VkCommandBuffer copyCmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
 		scene = new Scene(vulkanDevice, queue);
 
 #if defined(__ANDROID__)

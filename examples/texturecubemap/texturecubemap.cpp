@@ -17,13 +17,13 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#include <gli/gli.hpp>
-
 #include <vulkan/vulkan.h>
 #include "vulkanexamplebase.h"
 #include "VulkanBuffer.hpp"
 #include "VulkanTexture.hpp"
 #include "VulkanModel.hpp"
+#include <ktx.h>
+#include <ktxvulkan.h>
 
 #define ENABLE_VALIDATION false
 
@@ -54,7 +54,8 @@ public:
 
 	struct UBOVS {
 		glm::mat4 projection;
-		glm::mat4 model;
+		glm::mat4 modelView;
+		glm::mat4 inverseModelview;
 		float lodBias = 0.0f;
 	} uboVS;
 
@@ -75,16 +76,18 @@ public:
 
 	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 	{
-		zoom = -4.0f;
-		rotationSpeed = 0.25f;
-		rotation = { -7.25f, -120.0f, 0.0f };
 		title = "Cube map textures";
+		camera.type = Camera::CameraType::lookat;
+		camera.setPosition(glm::vec3(0.0f, 0.0f, -4.0f));
+		camera.setRotation(glm::vec3(-7.25f, -120.0f, 0.0f));
+		camera.setRotationSpeed(0.25f);
+		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);
 		settings.overlay = true;
 	}
 
 	~VulkanExample()
 	{
-		// Clean up used Vulkan resources 
+		// Clean up used Vulkan resources
 		// Note : Inherited destructor cleans up resources stored in base class
 
 		// Clean up texture resources
@@ -108,7 +111,7 @@ public:
 		uniformBuffers.skybox.destroy();
 	}
 
-	// Enable physical device features required for this example				
+	// Enable physical device features required for this example
 	virtual void getEnabledFeatures()
 	{
 		if (deviceFeatures.samplerAnisotropy) {
@@ -127,28 +130,38 @@ public:
 
 	void loadCubemap(std::string filename, VkFormat format, bool forceLinearTiling)
 	{
+		ktxResult result;
+		ktxTexture* ktxTexture;
+
 #if defined(__ANDROID__)
 		// Textures are stored inside the apk on Android (compressed)
 		// So they need to be loaded via the asset manager
 		AAsset* asset = AAssetManager_open(androidApp->activity->assetManager, filename.c_str(), AASSET_MODE_STREAMING);
-		assert(asset);
+		if (!asset) {
+			vks::tools::exitFatal("Could not load texture from " + filename + "\n\nThe file may be part of the additional asset pack.\n\nRun \"download_assets.py\" in the repository root to download the latest version.", -1);
+		}
 		size_t size = AAsset_getLength(asset);
 		assert(size > 0);
 
-		void *textureData = malloc(size);
+		ktx_uint8_t *textureData = new ktx_uint8_t[size];
 		AAsset_read(asset, textureData, size);
 		AAsset_close(asset);
-
-		gli::texture_cube texCube(gli::load((const char*)textureData, size));
+		result = ktxTexture_CreateFromMemory(textureData, size, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxTexture);
+		delete[] textureData;
 #else
-		gli::texture_cube texCube(gli::load(filename));
+		if (!vks::tools::fileExists(filename)) {
+			vks::tools::exitFatal("Could not load texture from " + filename + "\n\nThe file may be part of the additional asset pack.\n\nRun \"download_assets.py\" in the repository root to download the latest version.", -1);
+		}
+		result = ktxTexture_CreateFromNamedFile(filename.c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxTexture);
 #endif
+		assert(result == KTX_SUCCESS);
 
-		assert(!texCube.empty());
-
-		cubeMap.width = texCube.extent().x;
-		cubeMap.height = texCube.extent().y;
-		cubeMap.mipLevels = texCube.levels();
+		// Get properties required for using and upload texture data from the ktx texture object
+		cubeMap.width = ktxTexture->baseWidth;
+		cubeMap.height = ktxTexture->baseHeight;
+		cubeMap.mipLevels = ktxTexture->numLevels;
+		ktx_uint8_t *ktxTextureData = ktxTexture_GetData(ktxTexture);
+		ktx_size_t ktxTextureSize = ktxTexture_GetSize(ktxTexture);
 
 		VkMemoryAllocateInfo memAllocInfo = vks::initializers::memoryAllocateInfo();
 		VkMemoryRequirements memReqs;
@@ -158,7 +171,7 @@ public:
 		VkDeviceMemory stagingMemory;
 
 		VkBufferCreateInfo bufferCreateInfo = vks::initializers::bufferCreateInfo();
-		bufferCreateInfo.size = texCube.size();
+		bufferCreateInfo.size = ktxTextureSize;
 		// This buffer is used as a transfer source for the buffer copy
 		bufferCreateInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 		bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -176,7 +189,7 @@ public:
 		// Copy texture data into staging buffer
 		uint8_t *data;
 		VK_CHECK_RESULT(vkMapMemory(device, stagingMemory, 0, memReqs.size, 0, (void **)&data));
-		memcpy(data, texCube.data(), texCube.size());
+		memcpy(data, ktxTextureData, ktxTextureSize);
 		vkUnmapMemory(device, stagingMemory);
 
 		// Create optimal tiled target image
@@ -205,9 +218,9 @@ public:
 		VK_CHECK_RESULT(vkAllocateMemory(device, &memAllocInfo, nullptr, &cubeMap.deviceMemory));
 		VK_CHECK_RESULT(vkBindImageMemory(device, cubeMap.image, cubeMap.deviceMemory, 0));
 
-		VkCommandBuffer copyCmd = VulkanExampleBase::createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+		VkCommandBuffer copyCmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
 
-		// Setup buffer copy regions for each face including all of it's miplevels
+		// Setup buffer copy regions for each face including all of its miplevels
 		std::vector<VkBufferImageCopy> bufferCopyRegions;
 		uint32_t offset = 0;
 
@@ -215,20 +228,20 @@ public:
 		{
 			for (uint32_t level = 0; level < cubeMap.mipLevels; level++)
 			{
+				// Calculate offset into staging buffer for the current mip level and face
+				ktx_size_t offset;
+				KTX_error_code ret = ktxTexture_GetImageOffset(ktxTexture, level, 0, face, &offset);
+				assert(ret == KTX_SUCCESS);
 				VkBufferImageCopy bufferCopyRegion = {};
 				bufferCopyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 				bufferCopyRegion.imageSubresource.mipLevel = level;
 				bufferCopyRegion.imageSubresource.baseArrayLayer = face;
 				bufferCopyRegion.imageSubresource.layerCount = 1;
-				bufferCopyRegion.imageExtent.width = texCube[face][level].extent().x;
-				bufferCopyRegion.imageExtent.height = texCube[face][level].extent().y;
+				bufferCopyRegion.imageExtent.width = ktxTexture->baseWidth >> level;
+				bufferCopyRegion.imageExtent.height = ktxTexture->baseHeight >> level;
 				bufferCopyRegion.imageExtent.depth = 1;
 				bufferCopyRegion.bufferOffset = offset;
-
 				bufferCopyRegions.push_back(bufferCopyRegion);
-
-				// Increase offset into staging buffer for next level / face
-				offset += texCube[face][level].size();
 			}
 		}
 
@@ -266,7 +279,7 @@ public:
 			cubeMap.imageLayout,
 			subresourceRange);
 
-		VulkanExampleBase::flushCommandBuffer(copyCmd, queue, true);
+		vulkanDevice->flushCommandBuffer(copyCmd, queue, true);
 
 		// Create sampler
 		VkSamplerCreateInfo sampler = vks::initializers::samplerCreateInfo();
@@ -306,6 +319,7 @@ public:
 		// Clean up staging resources
 		vkFreeMemory(device, stagingMemory, nullptr);
 		vkDestroyBuffer(device, stagingBuffer, nullptr);
+		ktxTexture_Destroy(ktxTexture);
 	}
 
 	void loadTextures()
@@ -414,7 +428,7 @@ public:
 			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2)
 		};
 
-		VkDescriptorPoolCreateInfo descriptorPoolInfo = 
+		VkDescriptorPoolCreateInfo descriptorPoolInfo =
 			vks::initializers::descriptorPoolCreateInfo(
 				poolSizes.size(),
 				poolSizes.data(),
@@ -425,21 +439,21 @@ public:
 
 	void setupDescriptorSetLayout()
 	{
-		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = 
+		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings =
 		{
-			// Binding 0 : Vertex shader uniform buffer
+			// Binding 0 : Uniform buffer
 			vks::initializers::descriptorSetLayoutBinding(
-				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 
-				VK_SHADER_STAGE_VERTEX_BIT, 
+				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+				VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 				0),
 			// Binding 1 : Fragment shader image sampler
 			vks::initializers::descriptorSetLayoutBinding(
-				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 
-				VK_SHADER_STAGE_FRAGMENT_BIT, 
+				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				VK_SHADER_STAGE_FRAGMENT_BIT,
 				1)
 		};
 
-		VkDescriptorSetLayoutCreateInfo descriptorLayout = 
+		VkDescriptorSetLayoutCreateInfo descriptorLayout =
 			vks::initializers::descriptorSetLayoutCreateInfo(
 				setLayoutBindings.data(),
 				setLayoutBindings.size());
@@ -476,15 +490,15 @@ public:
 		{
 			// Binding 0 : Vertex shader uniform buffer
 			vks::initializers::writeDescriptorSet(
-				descriptorSets.object, 
-				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 
-				0, 
+				descriptorSets.object,
+				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+				0,
 				&uniformBuffers.object.descriptor),
 			// Binding 1 : Fragment shader cubemap sampler
 			vks::initializers::writeDescriptorSet(
-				descriptorSets.object, 
-				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 
-				1, 
+				descriptorSets.object,
+				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				1,
 				&textureDescriptor)
 		};
 		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
@@ -532,7 +546,7 @@ public:
 
 		VkPipelineColorBlendStateCreateInfo colorBlendState =
 			vks::initializers::pipelineColorBlendStateCreateInfo(
-				1, 
+				1,
 				&blendAttachmentState);
 
 		VkPipelineDepthStencilStateCreateInfo depthStencilState =
@@ -607,7 +621,7 @@ public:
 	// Prepare and initialize uniform buffer containing shader uniforms
 	void prepareUniformBuffers()
 	{
-		// Objact vertex shader uniform buffer
+		// Object vertex shader uniform buffer
 		VK_CHECK_RESULT(vulkanDevice->createBuffer(
 			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -631,39 +645,23 @@ public:
 	void updateUniformBuffers()
 	{
 		// 3D object
-		glm::mat4 viewMatrix = glm::mat4(1.0f);
-		uboVS.projection = glm::perspective(glm::radians(60.0f), (float)width / (float)height, 0.001f, 256.0f);
-		viewMatrix = glm::translate(viewMatrix, glm::vec3(0.0f, 0.0f, zoom));
-
-		uboVS.model = glm::mat4(1.0f);
-		uboVS.model = viewMatrix * glm::translate(uboVS.model, cameraPos);
-		uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-		uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-		uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
-
+		uboVS.projection = camera.matrices.perspective;
+		uboVS.modelView = camera.matrices.view;
+		uboVS.inverseModelview = glm::inverse(camera.matrices.view);
 		memcpy(uniformBuffers.object.mapped, &uboVS, sizeof(uboVS));
-
 		// Skybox
-		viewMatrix = glm::mat4(1.0f);
-		uboVS.projection = glm::perspective(glm::radians(60.0f), (float)width / (float)height, 0.001f, 256.0f);
-
-		uboVS.model = glm::mat4(1.0f);
-		uboVS.model = viewMatrix * glm::translate(uboVS.model, glm::vec3(0, 0, 0));
-		uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-		uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-		uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
-
+		uboVS.modelView = camera.matrices.view;
+		// Cancel out translation
+		uboVS.modelView[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		memcpy(uniformBuffers.skybox.mapped, &uboVS, sizeof(uboVS));
 	}
 
 	void draw()
 	{
 		VulkanExampleBase::prepareFrame();
-
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
 		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
-
 		VulkanExampleBase::submitFrame();
 	}
 

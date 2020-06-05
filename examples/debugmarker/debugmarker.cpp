@@ -6,6 +6,12 @@
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
 
+/*
+ * Note: This sample is deprecated!
+ * An updated version using VK_EXT_debug_utils along with an in-depth tutorial is available in the pfficial Khronos Vulkan Samples repository at 
+ * https://github.com/KhronosGroup/Vulkan-Samples/blob/master/samples/extensions/debug_utils.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -234,9 +240,8 @@ public:
 	{
 		title = "Debugging with VK_EXT_debug_marker";
 		settings.overlay = true;
-		zoomSpeed = 2.5f;
-		rotationSpeed = 0.5f;
 		camera.setRotation(glm::vec3(-4.35f, 16.25f, 0.0f));
+		camera.setRotationSpeed(0.5f);
 		camera.setPosition(glm::vec3(0.1f, 1.1f, -8.5f));
 		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);
 	}

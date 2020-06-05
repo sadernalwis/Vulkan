@@ -35,9 +35,6 @@
 #endif
 #define SHADOWMAP_FILTER VK_FILTER_LINEAR
 
-// Offscreen frame buffer properties
-#define FB_COLOR_FORMAT VK_FORMAT_R8G8B8A8_UNORM
-
 class VulkanExample : public VulkanExampleBase
 {
 public:
@@ -134,9 +131,11 @@ public:
 
 	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 	{
-		zoom = -20.0f;
-		rotation = { -15.0f, -390.0f, 0.0f };
 		title = "Projected shadow mapping";
+		camera.type = Camera::CameraType::lookat;
+		camera.setPosition(glm::vec3(0.0f, -0.0f, -20.0f));
+		camera.setRotation(glm::vec3(-15.0f, -390.0f, 0.0f));
+		camera.setPerspective(60.0f, (float)width / (float)height, 1.0f, 256.0f);
 		timerSpeed *= 0.5f;
 		settings.overlay = true;
 	}
@@ -239,8 +238,6 @@ public:
 	{
 		offscreenPass.width = SHADOWMAP_DIM;
 		offscreenPass.height = SHADOWMAP_DIM;
-
-		VkFormat fbColorFormat = FB_COLOR_FORMAT;
 
 		// For shadow mapping we only need a depth attachment
 		VkImageCreateInfo image = vks::initializers::imageCreateInfo();
@@ -656,7 +653,7 @@ public:
 			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 			&uniformBuffers.debug,
-			sizeof(uboVSscene)));
+			sizeof(uboVSquad)));
 
 		// Offscreen vertex shader uniform buffer block
 		VK_CHECK_RESULT(vulkanDevice->createBuffer(
@@ -694,26 +691,16 @@ public:
 	{
 		// Shadow map debug quad
 		float AR = (float)height / (float)width;
-
 		uboVSquad.projection = glm::ortho(2.5f / AR, 0.0f, 0.0f, 2.5f, -1.0f, 1.0f);
 		uboVSquad.model = glm::mat4(1.0f);
-
 		memcpy(uniformBuffers.debug.mapped, &uboVSquad, sizeof(uboVSquad));
 
 		// 3D scene
-		uboVSscene.projection = glm::perspective(glm::radians(45.0f), (float)width / (float)height, zNear, zFar);
-
-		uboVSscene.view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, zoom));
-		uboVSscene.view = glm::rotate(uboVSscene.view, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-		uboVSscene.view = glm::rotate(uboVSscene.view, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-		uboVSscene.view = glm::rotate(uboVSscene.view, glm::radians(rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
-
+		uboVSscene.projection = camera.matrices.perspective;
+		uboVSscene.view = camera.matrices.view;
 		uboVSscene.model = glm::mat4(1.0f);
-
 		uboVSscene.lightPos = lightPos;
-
 		uboVSscene.depthBiasMVP = uboOffscreenVS.depthMVP;
-
 		memcpy(uniformBuffers.scene.mapped, &uboVSscene, sizeof(uboVSscene));
 	}
 
