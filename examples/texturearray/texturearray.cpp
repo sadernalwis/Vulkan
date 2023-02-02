@@ -6,26 +6,13 @@
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <time.h>
-#include <vector>
-
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
-#include <vulkan/vulkan.h>
 #include "vulkanexamplebase.h"
-#include "VulkanTexture.hpp"
-#include "VulkanBuffer.hpp"
 #include <ktx.h>
 #include <ktxvulkan.h>
 
 #define ENABLE_VALIDATION false
+
+#define MAX_LAYERS 8
 
 // Vertex layout for this example
 struct Vertex {
@@ -61,7 +48,7 @@ public:
 			glm::mat4 projection;
 			glm::mat4 view;
 		} matrices;
-		// Seperate data for each instance
+		// Separate data for each instance
 		UboInstanceData *instance;
 	} uboVS;
 
@@ -74,7 +61,6 @@ public:
 	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 	{
 		title = "Texture arrays";
-		settings.overlay = true;
 		camera.type = Camera::CameraType::lookat;
 		camera.setPosition(glm::vec3(0.0f, 0.0f, -7.5f));
 		camera.setRotation(glm::vec3(-35.0f, 0.0f, 0.0f));
@@ -136,6 +122,7 @@ public:
 		textureArray.width = ktxTexture->baseWidth;
 		textureArray.height = ktxTexture->baseHeight;
 		layerCount = ktxTexture->numLayers;
+        assert(layerCount <= MAX_LAYERS);
 		ktx_uint8_t *ktxTextureData = ktxTexture_GetData(ktxTexture);
 		ktx_size_t ktxTextureSize = ktxTexture_GetSize(ktxTexture);
 
@@ -274,7 +261,6 @@ public:
 		VkImageViewCreateInfo view = vks::initializers::imageViewCreateInfo();
 		view.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
 		view.format = format;
-		view.components = { VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A };
 		view.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 		view.subresourceRange.layerCount = layerCount;
 		view.subresourceRange.levelCount = 1;
@@ -287,28 +273,9 @@ public:
 		ktxTexture_Destroy(ktxTexture);
 	}
 
-	void loadTextures()
+	void loadAssets()
 	{
-		// Vulkan core supports three different compressed texture formats
-		// As the support differs between implemementations we need to check device features and select a proper format and file
-		std::string filename;
-		VkFormat format;
-		if (deviceFeatures.textureCompressionBC) {
-			filename = "texturearray_bc3_unorm.ktx";
-			format = VK_FORMAT_BC3_UNORM_BLOCK;
-		}
-		else if (deviceFeatures.textureCompressionASTC_LDR) {
-			filename = "texturearray_astc_8x8_unorm.ktx";
-			format = VK_FORMAT_ASTC_8x8_UNORM_BLOCK;
-		}
-		else if (deviceFeatures.textureCompressionETC2) {
-			filename = "texturearray_etc2_unorm.ktx";
-			format = VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK;
-		}
-		else {
-			vks::tools::exitFatal("Device does not support any compressed texture format!", VK_ERROR_FEATURE_NOT_PRESENT);
-		}
-		loadTextureArray(getAssetPath() + "textures/" + filename, format);
+		loadTextureArray(getAssetPath() + "textures/texturearray_rgba.ktx", VK_FORMAT_R8G8B8A8_UNORM);
 	}
 
 	void buildCommandBuffers()
@@ -485,7 +452,7 @@ public:
 		vertexInputStateCI.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributes.size());
 		vertexInputStateCI.pVertexAttributeDescriptions = vertexInputAttributes.data();
 
-		// Instacing pipeline
+		// Instancing pipeline
 		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
 
 		shaderStages[0] = loadShader(getShadersPath() + "texturearray/instancing.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
@@ -510,7 +477,7 @@ public:
 	{
 		uboVS.instance = new UboInstanceData[layerCount];
 
-		uint32_t uboSize = sizeof(uboVS.matrices) + (layerCount * sizeof(UboInstanceData));
+		uint32_t uboSize = sizeof(uboVS.matrices) + (MAX_LAYERS * sizeof(UboInstanceData));
 
 		// Vertex shader uniform buffer block
 		VK_CHECK_RESULT(vulkanDevice->createBuffer(
@@ -565,7 +532,7 @@ public:
 	void prepare()
 	{
 		VulkanExampleBase::prepare();
-		loadTextures();
+		loadAssets();
 		generateCube();
 		prepareUniformBuffers();
 		setupDescriptorSetLayout();
@@ -585,6 +552,10 @@ public:
 			updateUniformBuffersCamera();
 	}
 
+	virtual void viewChanged()
+	{
+		updateUniformBuffersCamera();
+	}
 };
 
 VULKAN_EXAMPLE_MAIN()

@@ -8,22 +8,8 @@
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <vector>
-
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
-
-#include <vulkan/vulkan.h>
 #include "vulkanexamplebase.h"
-#include "VulkanTexture.hpp"
-#include "VulkanModel.hpp"
+#include "VulkanglTFModel.h"
 
 #define ENABLE_VALIDATION false
 
@@ -31,13 +17,6 @@ class VulkanExample : public VulkanExampleBase
 {
 public:
 	bool animate = true;
-
-	vks::VertexLayout vertexLayout = vks::VertexLayout({
-		vks::VERTEX_COMPONENT_POSITION,
-		vks::VERTEX_COMPONENT_NORMAL,
-		vks::VERTEX_COMPONENT_UV,
-		vks::VERTEX_COMPONENT_COLOR,
-	});
 
 	struct Cube {
 		struct Matrices {
@@ -52,9 +31,7 @@ public:
 	};
 	std::array<Cube, 2> cubes;
 
-	struct Models {
-		vks::Model cube;
-	} models;
+	vkglTF::Model model;
 
 	VkPipeline pipeline;
 	VkPipelineLayout pipelineLayout;
@@ -64,7 +41,6 @@ public:
 	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 	{
 		title = "Using descriptor Sets";
-		settings.overlay = true;
 		camera.type = Camera::CameraType::lookat;
 		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 512.0f);
 		camera.setRotation(glm::vec3(0.0f, 0.0f, 0.0f));
@@ -76,7 +52,6 @@ public:
 		vkDestroyPipeline(device, pipeline, nullptr);
 		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-		models.cube.destroy();
 		for (auto cube : cubes) {
 			cube.uniformBuffer.destroy();
 			cube.texture.destroy();
@@ -122,9 +97,7 @@ public:
 			VkRect2D scissor = vks::initializers::rect2D(width, height, 0, 0);
 			vkCmdSetScissor(drawCmdBuffers[i], 0, 1, &scissor);
 
-			VkDeviceSize offsets[1] = { 0 };
-			vkCmdBindVertexBuffers(drawCmdBuffers[i], 0, 1, &models.cube.vertices.buffer, offsets);
-			vkCmdBindIndexBuffer(drawCmdBuffers[i], models.cube.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+			model.bindBuffers(drawCmdBuffers[i]);
 
 			/*
 				[POI] Render cubes with separate descriptor sets
@@ -132,7 +105,7 @@ public:
 			for (auto cube : cubes) {
 				// Bind the cube's descriptor set. This tells the command buffer to use the uniform buffer and image set for this cube
 				vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &cube.descriptorSet, 0, nullptr);
-				vkCmdDrawIndexed(drawCmdBuffers[i], models.cube.indexCount, 1, 0, 0, 0);
+				model.draw(drawCmdBuffers[i]);
 			}
 
 			drawUI(drawCmdBuffers[i]);
@@ -145,7 +118,8 @@ public:
 
 	void loadAssets()
 	{
-		models.cube.loadFromFile(getAssetPath() + "models/cube.dae", vertexLayout, 1.0f, vulkanDevice, queue);
+		const uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::PreMultiplyVertexColors | vkglTF::FileLoadingFlags::FlipY;
+		model.loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, glTFLoadingFlags);
 		cubes[0].texture.loadFromFile(getAssetPath() + "textures/crate01_color_height_rgba.ktx", VK_FORMAT_R8G8B8A8_UNORM, vulkanDevice, queue);
 		cubes[1].texture.loadFromFile(getAssetPath() + "textures/crate02_color_height_rgba.ktx", VK_FORMAT_R8G8B8A8_UNORM, vulkanDevice, queue);
 	}
@@ -174,7 +148,7 @@ public:
 		std::array<VkDescriptorSetLayoutBinding,2> setLayoutBindings{};
 
 		/*
-			Binding 0: Uniform buffers (used to pass matrices matrices)
+			Binding 0: Uniform buffers (used to pass matrices)
 		*/
 		setLayoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		// Shader binding point
@@ -230,7 +204,7 @@ public:
 		descriptorPoolCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 		descriptorPoolCI.poolSizeCount = static_cast<uint32_t>(descriptorPoolSizes.size());
 		descriptorPoolCI.pPoolSizes = descriptorPoolSizes.data();
-		// Max. number of descriptor sets that can be allocted from this pool (one per object)
+		// Max. number of descriptor sets that can be allocated from this pool (one per object)
 		descriptorPoolCI.maxSets = static_cast<uint32_t>(cubes.size());
 
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolCI, nullptr, &descriptorPool));
@@ -241,7 +215,7 @@ public:
 
 			Using the shared descriptor set layout and the descriptor pool we will now allocate the descriptor sets.
 
-			Descriptor sets contain the actual descriptor fo the objects (buffers, images) used at render time.
+			Descriptor sets contain the actual descriptor for the objects (buffers, images) used at render time.
 
 		*/
 
@@ -276,7 +250,7 @@ public:
 			writeDescriptorSets[1].dstSet = cube.descriptorSet;
 			writeDescriptorSets[1].dstBinding = 1;
 			writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			// Images use a different descriptor strucutre, so we use pImageInfo instead of pBufferInfo
+			// Images use a different descriptor structure, so we use pImageInfo instead of pBufferInfo
 			writeDescriptorSets[1].pImageInfo = &cube.texture.descriptor;
 			writeDescriptorSets[1].descriptorCount = 1;
 
@@ -305,49 +279,30 @@ public:
 		const std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
-		VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE, 0);
+		VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
 		VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
 		VkPipelineColorBlendStateCreateInfo colorBlendStateCI = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
 		VkPipelineDepthStencilStateCreateInfo depthStencilStateCI = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
 		VkPipelineViewportStateCreateInfo viewportStateCI = vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
 		VkPipelineMultisampleStateCreateInfo multisampleStateCI = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT, 0);
 		VkPipelineDynamicStateCreateInfo dynamicStateCI = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables.data(), static_cast<uint32_t>(dynamicStateEnables.size()),0);
+		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
 
-		// Vertex bindings and attributes
-		const std::vector<VkVertexInputBindingDescription> vertexInputBindings = {
-			vks::initializers::vertexInputBindingDescription(0, vertexLayout.stride(), VK_VERTEX_INPUT_RATE_VERTEX),
-		};
-		const std::vector<VkVertexInputAttributeDescription> vertexInputAttributes = {
-			vks::initializers::vertexInputAttributeDescription(0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0),					// Location 0: Position
-			vks::initializers::vertexInputAttributeDescription(0, 1, VK_FORMAT_R32G32B32_SFLOAT, sizeof(float) * 3),	// Location 1: Normal
-			vks::initializers::vertexInputAttributeDescription(0, 2, VK_FORMAT_R32G32_SFLOAT, sizeof(float) * 6),		// Location 2: UV
-			vks::initializers::vertexInputAttributeDescription(0, 3, VK_FORMAT_R32G32B32_SFLOAT, sizeof(float) * 8),	// Location 3: Color
-		};
-		VkPipelineVertexInputStateCreateInfo vertexInputState = vks::initializers::pipelineVertexInputStateCreateInfo();
-		vertexInputState.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexInputBindings.size());
-		vertexInputState.pVertexBindingDescriptions = vertexInputBindings.data();
-		vertexInputState.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributes.size());
-		vertexInputState.pVertexAttributeDescriptions = vertexInputAttributes.data();
+		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass, 0);
+		pipelineCI.pInputAssemblyState = &inputAssemblyStateCI;
+		pipelineCI.pRasterizationState = &rasterizationStateCI;
+		pipelineCI.pColorBlendState = &colorBlendStateCI;
+		pipelineCI.pMultisampleState = &multisampleStateCI;
+		pipelineCI.pViewportState = &viewportStateCI;
+		pipelineCI.pDepthStencilState = &depthStencilStateCI;
+		pipelineCI.pDynamicState = &dynamicStateCI;
+		pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
+		pipelineCI.pStages = shaderStages.data();
+		pipelineCI.pVertexInputState  = vkglTF::Vertex::getPipelineVertexInputState({vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV, vkglTF::VertexComponent::Color});
 
-		VkGraphicsPipelineCreateInfo pipelineCreateInfoCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass, 0);
-		pipelineCreateInfoCI.pVertexInputState = &vertexInputState;
-		pipelineCreateInfoCI.pInputAssemblyState = &inputAssemblyStateCI;
-		pipelineCreateInfoCI.pRasterizationState = &rasterizationStateCI;
-		pipelineCreateInfoCI.pColorBlendState = &colorBlendStateCI;
-		pipelineCreateInfoCI.pMultisampleState = &multisampleStateCI;
-		pipelineCreateInfoCI.pViewportState = &viewportStateCI;
-		pipelineCreateInfoCI.pDepthStencilState = &depthStencilStateCI;
-		pipelineCreateInfoCI.pDynamicState = &dynamicStateCI;
-
-		const std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages = {
-			loadShader(getShadersPath() + "descriptorsets/cube.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-			loadShader(getShadersPath() + "descriptorsets/cube.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
-		};
-
-		pipelineCreateInfoCI.stageCount = static_cast<uint32_t>(shaderStages.size());
-		pipelineCreateInfoCI.pStages = shaderStages.data();
-
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfoCI, nullptr, &pipeline));
+	    shaderStages[0] = loadShader(getShadersPath() + "descriptorsets/cube.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+		shaderStages[1] = loadShader(getShadersPath() + "descriptorsets/cube.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipeline));
 	}
 
 	void prepareUniformBuffers()
@@ -376,6 +331,7 @@ public:
 			cube.matrices.model = glm::rotate(cube.matrices.model, glm::radians(cube.rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
 			cube.matrices.model = glm::rotate(cube.matrices.model, glm::radians(cube.rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
 			cube.matrices.model = glm::rotate(cube.matrices.model, glm::radians(cube.rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
+			cube.matrices.model = glm::scale(cube.matrices.model, glm::vec3(0.25f));
 			memcpy(cube.uniformBuffer.mapped, &cube.matrices, sizeof(cube.matrices));
 		}
 	}
@@ -405,7 +361,7 @@ public:
 		if (!prepared)
 			return;
 		draw();
-		if (animate) {
+		if (animate && !paused) {
 			cubes[0].rotation.x += 2.5f * frameTimer;
 			if (cubes[0].rotation.x > 360.0f)
 				cubes[0].rotation.x -= 360.0f;
@@ -413,7 +369,7 @@ public:
 			if (cubes[1].rotation.x > 360.0f)
 				cubes[1].rotation.x -= 360.0f;
 		}
-		if ((camera.updated) || (animate)) {
+		if ((camera.updated) || (animate && !paused)) {
 			updateUniformBuffers();
 		}
 	}

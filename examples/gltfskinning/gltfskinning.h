@@ -35,7 +35,6 @@
 #endif
 #include "tiny_gltf.h"
 
-#include "VulkanTexture.hpp"
 #include "vulkanexamplebase.h"
 #include <vulkan/vulkan.h>
 
@@ -233,5 +232,6 @@ class VulkanExample : public VulkanExampleBase
 	void         updateUniformBuffers();
 	void         prepare();
 	virtual void render();
+	virtual void viewChanged();
 	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay);
 };

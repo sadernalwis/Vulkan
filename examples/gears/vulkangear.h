@@ -21,8 +21,8 @@
 
 #include "vulkan/vulkan.h"
 #include "VulkanTools.h"
-#include "VulkanDevice.hpp"
-#include "VulkanBuffer.hpp"
+#include "VulkanBuffer.h"
+#include "VulkanDevice.h"
 
 struct Vertex
 {

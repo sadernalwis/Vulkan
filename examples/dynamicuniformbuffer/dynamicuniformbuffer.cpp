@@ -16,23 +16,7 @@
 * offset used to pass data from the single uniform buffer to the connected shader binding point.
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <vector>
-#include <array>
-#include <random>
-
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
-#include <vulkan/vulkan.h>
 #include "vulkanexamplebase.h"
-#include "VulkanDevice.hpp"
-#include "VulkanBuffer.hpp"
 
 #define VERTEX_BUFFER_BIND_ID 0
 #define ENABLE_VALIDATION false
@@ -117,7 +101,6 @@ public:
 		camera.setPosition(glm::vec3(0.0f, 0.0f, -30.0f));
 		camera.setRotation(glm::vec3(0.0f));
 		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);
-		settings.overlay = true;
 	}
 
 	~VulkanExample()
@@ -200,7 +183,7 @@ public:
 	{
 		VulkanExampleBase::prepareFrame();
 
-		// Command buffer to be sumitted to the queue
+		// Command buffer to be submitted to the queue
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
 
@@ -440,6 +423,9 @@ public:
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
 			&uniformBuffers.dynamic,
 			bufferSize));
+
+		// Override descriptor range to [base, base + dynamicAlignment]
+		uniformBuffers.dynamic.descriptor.range = dynamicAlignment;
 
 		// Map persistent
 		VK_CHECK_RESULT(uniformBuffers.view.map());

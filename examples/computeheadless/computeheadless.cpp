@@ -1,12 +1,10 @@
 /*
 * Vulkan Example - Minimal headless compute example
 *
-* Copyright (C) 2017 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2017-2022 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
-
-// TODO: separate transfer queue (if not supported by compute queue) including buffer ownership transfer
 
 #if defined(_WIN32)
 #pragma comment(linker, "/subsystem:console")
@@ -26,8 +24,12 @@
 #include <iostream>
 #include <algorithm>
 
+#if defined(VK_USE_PLATFORM_MACOS_MVK)
+#define VK_ENABLE_BETA_EXTENSIONS
+#endif
 #include <vulkan/vulkan.h>
 #include "VulkanTools.h"
+#include "CommandLineParser.hpp"
 
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
 android_app* androidapp;
@@ -56,6 +58,8 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugMessageCallback(
 	LOG("[VALIDATION]: %s - %s\n", pLayerPrefix, pMessage);
 	return VK_FALSE;
 }
+
+CommandLineParser commandLineParser;
 
 class VulkanExample
 {
@@ -140,14 +144,10 @@ public:
 		instanceCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 		instanceCreateInfo.pApplicationInfo = &appInfo;
 
-		uint32_t layerCount = 0;
-#if defined(VK_USE_PLATFORM_ANDROID_KHR)
-		const char* validationLayers[] = { "VK_LAYER_GOOGLE_threading",	"VK_LAYER_LUNARG_parameter_validation",	"VK_LAYER_LUNARG_object_tracker","VK_LAYER_LUNARG_core_validation",	"VK_LAYER_LUNARG_swapchain", "VK_LAYER_GOOGLE_unique_objects" };
-		layerCount = 6;
-#else
-		const char* validationLayers[] = { "VK_LAYER_LUNARG_standard_validation" };
-		layerCount = 1;
-#endif
+		uint32_t layerCount = 1;
+		const char* validationLayers[] = { "VK_LAYER_KHRONOS_validation" };
+
+		std::vector<const char*> instanceExtensions = {};
 #if DEBUG
 		// Check if layers are available
 		uint32_t instanceLayerCount;
@@ -171,13 +171,38 @@ public:
 		}
 
 		if (layersAvailable) {
+			instanceExtensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
 			instanceCreateInfo.ppEnabledLayerNames = validationLayers;
-			const char *validationExt = VK_EXT_DEBUG_REPORT_EXTENSION_NAME;
 			instanceCreateInfo.enabledLayerCount = layerCount;
-			instanceCreateInfo.enabledExtensionCount = 1;
-			instanceCreateInfo.ppEnabledExtensionNames = &validationExt;
 		}
 #endif
+#if defined(VK_USE_PLATFORM_MACOS_MVK)
+		// SRS - When running on macOS with MoltenVK, enable VK_KHR_get_physical_device_properties2 (required by VK_KHR_portability_subset)
+		instanceExtensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+#if defined(VK_KHR_portability_enumeration)
+		// SRS - When running on macOS with MoltenVK and VK_KHR_portability_enumeration is defined and supported by the instance, enable the extension and the flag
+		uint32_t instanceExtCount = 0;
+		vkEnumerateInstanceExtensionProperties(nullptr, &instanceExtCount, nullptr);
+		if (instanceExtCount > 0)
+		{
+			std::vector<VkExtensionProperties> extensions(instanceExtCount);
+			if (vkEnumerateInstanceExtensionProperties(nullptr, &instanceExtCount, &extensions.front()) == VK_SUCCESS)
+			{
+				for (VkExtensionProperties extension : extensions)
+				{
+					if (strcmp(extension.extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0)
+					{
+						instanceExtensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+						instanceCreateInfo.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+						break;
+					}
+				}
+			}
+		}
+#endif
+#endif
+		instanceCreateInfo.enabledExtensionCount = (uint32_t)instanceExtensions.size();
+		instanceCreateInfo.ppEnabledExtensionNames = instanceExtensions.data();
 		VK_CHECK_RESULT(vkCreateInstance(&instanceCreateInfo, nullptr, &instance));
 
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
@@ -233,6 +258,29 @@ public:
 		deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 		deviceCreateInfo.queueCreateInfoCount = 1;
 		deviceCreateInfo.pQueueCreateInfos = &queueCreateInfo;
+		std::vector<const char*> deviceExtensions = {};
+#if defined(VK_USE_PLATFORM_MACOS_MVK) && defined(VK_KHR_portability_subset)
+		// SRS - When running on macOS with MoltenVK and VK_KHR_portability_subset is defined and supported by the device, enable the extension
+		uint32_t deviceExtCount = 0;
+		vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &deviceExtCount, nullptr);
+		if (deviceExtCount > 0)
+		{
+			std::vector<VkExtensionProperties> extensions(deviceExtCount);
+			if (vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &deviceExtCount, &extensions.front()) == VK_SUCCESS)
+			{
+				for (VkExtensionProperties extension : extensions)
+				{
+					if (strcmp(extension.extensionName, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME) == 0)
+					{
+						deviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+						break;
+					}
+				}
+			}
+		}
+#endif
+		deviceCreateInfo.enabledExtensionCount = (uint32_t)deviceExtensions.size();
+		deviceCreateInfo.ppEnabledExtensionNames = deviceExtensions.data();
 		VK_CHECK_RESULT(vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &device));
 
 		// Get a compute queue
@@ -361,10 +409,11 @@ public:
 			VkSpecializationMapEntry specializationMapEntry = vks::initializers::specializationMapEntry(0, 0, sizeof(uint32_t));
 			VkSpecializationInfo specializationInfo = vks::initializers::specializationInfo(1, &specializationMapEntry, sizeof(SpecializationData), &specializationData);
 
-			// TODO: There is no command line arguments parsing (nor Android settings) for this
-			// example, so we have no way of picking between GLSL or HLSL shaders.
-			// Hard-code to glsl for now.
-			const std::string shadersPath = getAssetPath() + "shaders/glsl/computeheadless/";
+			std::string shaderDir = "glsl";
+			if (commandLineParser.isSet("shaders")) {
+				shaderDir = commandLineParser.getValueAsString("shaders", "glsl");
+			}
+			const std::string shadersPath = getAssetPath() + "shaders/"+shaderDir+"/computeheadless/";
 
 			VkPipelineShaderStageCreateInfo shaderStage = {};
 			shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -555,10 +604,18 @@ void android_main(android_app* state) {
 	}
 }
 #else
-int main() {
+int main(int argc, char* argv[]) {
+	commandLineParser.add("help", { "--help" }, 0, "Show help");
+	commandLineParser.add("shaders", { "-s", "--shaders" }, 1, "Select shader type to use (glsl or hlsl)");
+	commandLineParser.parse(argc, argv);
+	if (commandLineParser.isSet("help")) {
+		commandLineParser.printHelp();
+		std::cin.get();
+		return 0;
+	}
 	VulkanExample *vulkanExample = new VulkanExample();
 	std::cout << "Finished. Press enter to terminate...";
-	getchar();
+	std::cin.get();
 	delete(vulkanExample);
 	return 0;
 }

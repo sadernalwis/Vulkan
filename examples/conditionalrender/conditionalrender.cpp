@@ -4,27 +4,15 @@
 * Note: Requires a device that supports the VK_EXT_conditional_rendering extension
 *
 * With conditional rendering it's possible to execute certain rendering commands based on a buffer value instead of having to rebuild the command buffers.
-* This example sets up a conditonal buffer with one value per glTF part, that is used to toggle visibility of single model parts.
+* This example sets up a conditional buffer with one value per glTF part, that is used to toggle visibility of single model parts.
 *
 * Copyright (C) 2018 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <vector>
-
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
-#include <vulkan/vulkan.h>
 #include "vulkanexamplebase.h"
-#include "VulkanglTFModel.hpp"
+#include "VulkanglTFModel.h"
 
 #define ENABLE_VALIDATION false
 
@@ -55,7 +43,6 @@ public:
 	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 	{
 		title = "Conditional rendering";
-		settings.overlay = true;
 		camera.type = Camera::CameraType::lookat;
 		camera.setPerspective(45.0f, (float)width / (float)height, 0.1f, 512.0f);
 		camera.setRotation(glm::vec3(-2.25f, -52.0f, 0.0f));
@@ -191,7 +178,7 @@ public:
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayoutCI, nullptr, &descriptorSetLayout));
 
 		std::array<VkDescriptorSetLayout, 2> setLayouts = {
-			descriptorSetLayout, scene.descriptorSetLayout
+			descriptorSetLayout, vkglTF::descriptorSetLayoutUbo
 		};
 		VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(setLayouts.data(), 2);
 		VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::vec4) * 2,	0);
@@ -220,38 +207,25 @@ public:
 		VkPipelineMultisampleStateCreateInfo multisampleStateCI = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT, 0);
 		VkPipelineDynamicStateCreateInfo dynamicStateCI = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables.data(), static_cast<uint32_t>(dynamicStateEnables.size()), 0);
 
-		// Vertex bindings and attributes
-		VkVertexInputBindingDescription vertexInputBinding = vkglTF::Vertex::inputBindingDescription(0);
-		const std::vector<VkVertexInputAttributeDescription> vertexInputAttributes = {
-			vkglTF::Vertex::inputAttributeDescription(0, 0, vkglTF::VertexComponent::Position),
-			vkglTF::Vertex::inputAttributeDescription(0, 1, vkglTF::VertexComponent::Normal),
-			vkglTF::Vertex::inputAttributeDescription(0, 2, vkglTF::VertexComponent::UV)
-		};
-		VkPipelineVertexInputStateCreateInfo vertexInputState = vks::initializers::pipelineVertexInputStateCreateInfo();
-		vertexInputState.vertexBindingDescriptionCount = 1;
-		vertexInputState.pVertexBindingDescriptions = &vertexInputBinding;
-		vertexInputState.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributes.size());
-		vertexInputState.pVertexAttributeDescriptions = vertexInputAttributes.data();
-
-		VkGraphicsPipelineCreateInfo pipelineCreateInfoCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass, 0);
-		pipelineCreateInfoCI.pVertexInputState = &vertexInputState;
-		pipelineCreateInfoCI.pInputAssemblyState = &inputAssemblyStateCI;
-		pipelineCreateInfoCI.pRasterizationState = &rasterizationStateCI;
-		pipelineCreateInfoCI.pColorBlendState = &colorBlendStateCI;
-		pipelineCreateInfoCI.pMultisampleState = &multisampleStateCI;
-		pipelineCreateInfoCI.pViewportState = &viewportStateCI;
-		pipelineCreateInfoCI.pDepthStencilState = &depthStencilStateCI;
-		pipelineCreateInfoCI.pDynamicState = &dynamicStateCI;
+		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass, 0);
+		pipelineCI.pInputAssemblyState = &inputAssemblyStateCI;
+		pipelineCI.pRasterizationState = &rasterizationStateCI;
+		pipelineCI.pColorBlendState = &colorBlendStateCI;
+		pipelineCI.pMultisampleState = &multisampleStateCI;
+		pipelineCI.pViewportState = &viewportStateCI;
+		pipelineCI.pDepthStencilState = &depthStencilStateCI;
+		pipelineCI.pDynamicState = &dynamicStateCI;
+		pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
 
 		const std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages = {
 			loadShader(getShadersPath() + "conditionalrender/model.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
 			loadShader(getShadersPath() + "conditionalrender/model.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
 		};
 
-		pipelineCreateInfoCI.stageCount = static_cast<uint32_t>(shaderStages.size());
-		pipelineCreateInfoCI.pStages = shaderStages.data();
+		pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
+		pipelineCI.pStages = shaderStages.data();
 
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfoCI, nullptr, &pipeline));
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipeline));
 	}
 
 	void prepareUniformBuffers()
@@ -281,7 +255,7 @@ public:
 	/*
 		[POI] Extension specific setup
 
-		Gets the function pointers required for conditonal rendering
+		Gets the function pointers required for conditional rendering
 		Sets up a dedicated conditional buffer that is used to determine visibility at draw time
 	*/
 	void prepareConditionalRendering()
@@ -356,6 +330,11 @@ public:
 		}
 	}
 
+	virtual void viewChanged()
+	{
+		updateUniformBuffers();
+	}
+
 	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay)
 	{
 		if (overlay->header("Visibility")) {
@@ -375,7 +354,7 @@ public:
 			}
 			ImGui::NewLine();
 
-			ImGui::BeginChild("InnerRegion", ImVec2(200.0f, 400.0f), false);
+			ImGui::BeginChild("InnerRegion", ImVec2(200.0f * overlay->scale, 400.0f * overlay->scale), false);
 			for (auto node : scene.linearNodes) {
 				// Add visibility toggle checkboxes for all model nodes with a mesh
 				if (node->mesh) {

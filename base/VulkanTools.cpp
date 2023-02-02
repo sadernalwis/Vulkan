@@ -8,6 +8,8 @@
 
 #include "VulkanTools.h"
 
+#if !(defined(VK_USE_PLATFORM_IOS_MVK) || defined(VK_USE_PLATFORM_MACOS_MVK))
+// iOS & macOS: VulkanExampleBase::getAssetPath() implemented externally to allow access to Objective-C components
 const std::string getAssetPath()
 {
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
@@ -18,6 +20,7 @@ const std::string getAssetPath()
 	return "./../data/";
 #endif
 }
+#endif
 
 namespace vks
 {
@@ -68,6 +71,7 @@ namespace vks
 				STR(INTEGRATED_GPU);
 				STR(DISCRETE_GPU);
 				STR(VIRTUAL_GPU);
+				STR(CPU);
 #undef STR
 			default: return "UNKNOWN_DEVICE_TYPE";
 			}
@@ -96,6 +100,32 @@ namespace vks
 					return true;
 				}
 			}
+
+			return false;
+		}
+
+		VkBool32 formatHasStencil(VkFormat format)
+		{
+			std::vector<VkFormat> stencilFormats = {
+				VK_FORMAT_S8_UINT,
+				VK_FORMAT_D16_UNORM_S8_UINT,
+				VK_FORMAT_D24_UNORM_S8_UINT,
+				VK_FORMAT_D32_SFLOAT_S8_UINT,
+			};
+			return std::find(stencilFormats.begin(), stencilFormats.end(), format) != std::end(stencilFormats);
+		}
+
+		// Returns if a given format support LINEAR filtering
+		VkBool32 formatIsFilterable(VkPhysicalDevice physicalDevice, VkFormat format, VkImageTiling tiling)
+		{
+			VkFormatProperties formatProps;
+			vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &formatProps);
+
+			if (tiling == VK_IMAGE_TILING_OPTIMAL)
+				return formatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+
+			if (tiling == VK_IMAGE_TILING_LINEAR)
+				return formatProps.linearTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
 
 			return false;
 		}
@@ -273,7 +303,7 @@ namespace vks
 				1, &imageMemoryBarrier);
 		}
 
-		void exitFatal(std::string message, int32_t exitCode)
+		void exitFatal(const std::string& message, int32_t exitCode)
 		{
 #if defined(_WIN32)
 			if (!errorModeSilent) {
@@ -289,7 +319,7 @@ namespace vks
 #endif
 		}
 
-		void exitFatal(std::string message, VkResult resultCode)
+		void exitFatal(const std::string& message, VkResult resultCode)
 		{
 			exitFatal(message, (int32_t)resultCode);
 		}
@@ -352,7 +382,7 @@ namespace vks
 			}
 			else
 			{
-				std::cerr << "Error: Could not open shader file \"" << fileName << "\"" << std::endl;
+				std::cerr << "Error: Could not open shader file \"" << fileName << "\"" << "\n";
 				return VK_NULL_HANDLE;
 			}
 		}
@@ -363,5 +393,11 @@ namespace vks
 			std::ifstream f(filename.c_str());
 			return !f.fail();
 		}
+
+		uint32_t alignedSize(uint32_t value, uint32_t alignment)
+        {
+	        return (value + alignment - 1) & ~(alignment - 1);
+        }
+
 	}
 }

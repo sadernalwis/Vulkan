@@ -10,7 +10,7 @@ android {
         versionCode 1
         versionName "1.0"
         ndk {
-            abiFilters "armeabi-v7a"
+            abiFilters "arm64-v8a"
         }
         externalNativeBuild {
             cmake {
@@ -55,23 +55,10 @@ task copyTask {
     }
 
     copy {
-       from '../../../data/models/lowpoly'
-       into 'assets/models/lowpoly'
-       include '*.*'
-    }
-
-    copy {
        from '../../../data/models'
        into 'assets/models'
-       include 'retroufo_glow.dae'
+       include 'deer.gltf'
     }
-
-    copy {
-       from '../../../data/textures'
-       into 'assets/textures'
-       include 'deer*.ktx'
-    }
-
 
 }
 

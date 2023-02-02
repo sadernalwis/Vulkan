@@ -6,25 +6,7 @@
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <vector>
-#include <random>
-#include <numeric>
-#include <ctime>
-
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
-#include <vulkan/vulkan.h>
 #include "vulkanexamplebase.h"
-#include "VulkanDevice.hpp"
-#include "VulkanBuffer.hpp"
-#include "VulkanModel.hpp"
 
 #define VERTEX_BUFFER_BIND_ID 0
 #define ENABLE_VALIDATION false
@@ -160,10 +142,6 @@ public:
 	} texture;
 
 	struct {
-		vks::Model cube;
-	} models;
-
-	struct {
 		VkPipelineVertexInputStateCreateInfo inputState;
 		std::vector<VkVertexInputBindingDescription> inputBinding;
 		std::vector<VkVertexInputAttributeDescription> inputAttributes;
@@ -197,7 +175,6 @@ public:
 		camera.setPosition(glm::vec3(0.0f, 0.0f, -2.5f));
 		camera.setRotation(glm::vec3(0.0f, 15.0f, 0.0f));
 		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);
-		settings.overlay = true;
 		srand((unsigned int)time(NULL));
 	}
 
@@ -295,7 +272,6 @@ public:
 		view.image = texture.image;
 		view.viewType = VK_IMAGE_VIEW_TYPE_3D;
 		view.format = texture.format;
-		view.components = { VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A };
 		view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		view.subresourceRange.baseMipLevel = 0;
 		view.subresourceRange.baseArrayLayer = 0;
@@ -330,11 +306,11 @@ public:
 		const float noiseScale = static_cast<float>(rand() % 10) + 4.0f;
 
 #pragma omp parallel for
-		for (uint32_t z = 0; z < texture.depth; z++)
+		for (int32_t z = 0; z < texture.depth; z++)
 		{
-			for (uint32_t y = 0; y < texture.height; y++)
+			for (int32_t y = 0; y < texture.height; y++)
 			{
-				for (uint32_t x = 0; x < texture.width; x++)
+				for (int32_t x = 0; x < texture.width; x++)
 				{
 					float nx = (float)x / (float)texture.width;
 					float ny = (float)y / (float)texture.height;
@@ -503,7 +479,7 @@ public:
 	{
 		VulkanExampleBase::prepareFrame();
 
-		// Command buffer to be sumitted to the queue
+		// Command buffer to be submitted to the queue
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
 
@@ -794,6 +770,11 @@ public:
 		draw();
 		if (!paused || camera.updated)
 			updateUniformBuffers(camera.updated);
+	}
+
+	virtual void viewChanged()
+	{
+		updateUniformBuffers(true);
 	}
 
 	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay)

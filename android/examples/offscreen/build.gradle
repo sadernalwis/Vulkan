@@ -10,7 +10,7 @@ android {
         versionCode 1
         versionName "1.0"
         ndk {
-            abiFilters "armeabi-v7a"
+            abiFilters "arm64-v8a"
         }
         externalNativeBuild {
             cmake {
@@ -57,21 +57,14 @@ task copyTask {
     copy {
        from '../../../data/models'
        into 'assets/models'
-       include 'plane.obj'
+       include 'plane.gltf'
     }
 
     copy {
        from '../../../data/models'
        into 'assets/models'
-       include 'chinesedragon.dae'
+       include 'chinesedragon.gltf'
     }
-
-    copy {
-       from '../../../data/textures'
-       into 'assets/textures'
-       include 'darkmetal_*.ktx'
-    }
-
 
 }
 

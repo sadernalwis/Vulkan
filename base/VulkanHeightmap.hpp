@@ -10,8 +10,8 @@
 #include <glm/glm.hpp>
 
 #include "vulkan/vulkan.h"
-#include "VulkanDevice.hpp"
-#include "VulkanBuffer.hpp"
+#include "VulkanDevice.h"
+#include "VulkanBuffer.h"
 #include <ktx.h>
 #include <ktxvulkan.h>
 
@@ -146,7 +146,7 @@ namespace vks
 
 			switch (topology)
 			{
-				// Indices for triangles
+			// Indices for triangles
 			case topologyTriangles:
 			{
 				indices = new uint32_t[w * w * 6];

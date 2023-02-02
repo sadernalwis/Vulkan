@@ -6,21 +6,7 @@
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <vector>
-#include <random>
-
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
-#include <vulkan/vulkan.h>
 #include "vulkanexamplebase.h"
-#include "VulkanTexture.hpp"
 
 #define VERTEX_BUFFER_BIND_ID 0
 #define ENABLE_VALIDATION false
@@ -96,7 +82,6 @@ public:
 	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 	{
 		title = "Compute shader N-body system";
-		settings.overlay = true;
 		camera.type = Camera::CameraType::lookat;
 		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 512.0f);
 		camera.setRotation(glm::vec3(-26.0f, 75.0f, 0.0f));
@@ -175,7 +160,7 @@ public:
 
 				vkCmdPipelineBarrier(
 					drawCmdBuffers[i],
-					VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+					VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
 					VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
 					0,
 					0, nullptr,
@@ -222,7 +207,7 @@ public:
 				vkCmdPipelineBarrier(
 					drawCmdBuffers[i],
 					VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-					VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+					VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
 					0,
 					0, nullptr,
 					1, &buffer_barrier,
@@ -258,7 +243,7 @@ public:
 
 			vkCmdPipelineBarrier(
 				compute.commandBuffer,
-				VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
 				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 				0,
 				0, nullptr,
@@ -278,7 +263,7 @@ public:
 		bufferBarrier.size = compute.storageBuffer.descriptor.range;
 		bufferBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 		bufferBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		// Transfer ownership if compute and graphics queue familiy indices differ
+		// Transfer ownership if compute and graphics queue family indices differ
 		bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
@@ -315,7 +300,7 @@ public:
 			vkCmdPipelineBarrier(
 				compute.commandBuffer,
 				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-				VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+				VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
 				0,
 				0, nullptr,
 				1, &buffer_barrier,
@@ -432,7 +417,7 @@ public:
 			vkCmdPipelineBarrier(
 				copyCmd,
 				VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
 				0,
 				0, nullptr,
 				1, &buffer_barrier,
@@ -635,6 +620,13 @@ public:
 		// Semaphore for compute & graphics sync
 		VkSemaphoreCreateInfo semaphoreCreateInfo = vks::initializers::semaphoreCreateInfo();
 		VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &graphics.semaphore));
+
+		// Signal the semaphore
+		VkSubmitInfo submitInfo = vks::initializers::submitInfo();
+		submitInfo.signalSemaphoreCount = 1;
+		submitInfo.pSignalSemaphores = &graphics.semaphore;
+		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+		VK_CHECK_RESULT(vkQueueWaitIdle(queue));
 	}
 
 	void prepareCompute()
@@ -751,17 +743,12 @@ public:
 		VkSemaphoreCreateInfo semaphoreCreateInfo = vks::initializers::semaphoreCreateInfo();
 		VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &compute.semaphore));
 
-		// Signal the semaphore
-		VkSubmitInfo submitInfo = vks::initializers::submitInfo();
-		submitInfo.signalSemaphoreCount = 1;
-		submitInfo.pSignalSemaphores = &compute.semaphore;
-		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
-		VK_CHECK_RESULT(vkQueueWaitIdle(queue));
-
 		// Build a single command buffer containing the compute dispatch commands
 		buildComputeCommandBuffer();
 
+		// SRS - By reordering compute and graphics within draw(), the following code is no longer needed:
 		// If graphics and compute queue family indices differ, acquire and immediately release the storage buffer, so that the initial acquire from the graphics command buffers are matched up properly
+		/*
 		if (graphics.queueFamilyIndex != compute.queueFamilyIndex)
 		{
 			// Create a transient command buffer for setting up the initial buffer transfer state
@@ -811,6 +798,7 @@ public:
 
 			vulkanDevice->flushCommandBuffer(transferCmd, compute.queue, compute.commandPool);
 		}
+		*/
 	}
 
 	// Prepare and initialize uniform buffer containing shader uniforms
@@ -856,6 +844,20 @@ public:
 
 	void draw()
 	{
+		// Wait for rendering finished
+		VkPipelineStageFlags waitStageMask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+
+		// Submit compute commands
+		VkSubmitInfo computeSubmitInfo = vks::initializers::submitInfo();
+		computeSubmitInfo.commandBufferCount = 1;
+		computeSubmitInfo.pCommandBuffers = &compute.commandBuffer;
+		computeSubmitInfo.waitSemaphoreCount = 1;
+		computeSubmitInfo.pWaitSemaphores = &graphics.semaphore;
+		computeSubmitInfo.pWaitDstStageMask = &waitStageMask;
+		computeSubmitInfo.signalSemaphoreCount = 1;
+		computeSubmitInfo.pSignalSemaphores = &compute.semaphore;
+		VK_CHECK_RESULT(vkQueueSubmit(compute.queue, 1, &computeSubmitInfo, VK_NULL_HANDLE));
+
 		VulkanExampleBase::prepareFrame();
 
 		VkPipelineStageFlags graphicsWaitStageMasks[] = { VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
@@ -873,20 +875,6 @@ public:
 		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
 
 		VulkanExampleBase::submitFrame();
-
-		// Wait for rendering finished
-		VkPipelineStageFlags waitStageMask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-
-		// Submit compute commands
-		VkSubmitInfo computeSubmitInfo = vks::initializers::submitInfo();
-		computeSubmitInfo.commandBufferCount = 1;
-		computeSubmitInfo.pCommandBuffers = &compute.commandBuffer;
-		computeSubmitInfo.waitSemaphoreCount = 1;
-		computeSubmitInfo.pWaitSemaphores = &graphics.semaphore;
-		computeSubmitInfo.pWaitDstStageMask = &waitStageMask;
-		computeSubmitInfo.signalSemaphoreCount = 1;
-		computeSubmitInfo.pSignalSemaphores = &compute.semaphore;
-		VK_CHECK_RESULT(vkQueueSubmit(compute.queue, 1, &computeSubmitInfo, VK_NULL_HANDLE));
 	}
 
 	void prepare()
@@ -913,6 +901,11 @@ public:
 		if (camera.updated) {
 			updateGraphicsUniformBuffers();
 		}
+	}
+
+	virtual void viewChanged()
+	{
+		updateGraphicsUniformBuffers();
 	}
 };
 

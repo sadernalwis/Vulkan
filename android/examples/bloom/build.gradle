@@ -10,7 +10,7 @@ android {
         versionCode 1
         versionName "1.0"
         ndk {
-            abiFilters "armeabi-v7a"
+            abiFilters "arm64-v8a"
         }
         externalNativeBuild {
             cmake {
@@ -57,19 +57,19 @@ task copyTask {
     copy {
        from '../../../data/models'
        into 'assets/models'
-       include 'retroufo.dae'
+       include 'retroufo.gltf'
     }
 
     copy {
        from '../../../data/models'
        into 'assets/models'
-       include 'retroufo_glow.dae'
+       include 'retroufo_glow.gltf'
     }
 
     copy {
        from '../../../data/models'
        into 'assets/models'
-       include 'cube.obj'
+       include 'cube.gltf'
     }
 
     copy {

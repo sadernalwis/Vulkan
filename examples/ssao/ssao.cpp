@@ -6,27 +6,13 @@
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <vector>
-#include <random>
-
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
-#include <vulkan/vulkan.h>
 #include "vulkanexamplebase.h"
-#include "VulkanTexture.hpp"
-#include "VulkanModel.hpp"
+#include "VulkanglTFModel.h"
 
 #define ENABLE_VALIDATION false
 
-#define SSAO_KERNEL_SIZE 32
-#define SSAO_RADIUS 0.5f
+#define SSAO_KERNEL_SIZE 64
+#define SSAO_RADIUS 0.3f
 
 #if defined(__ANDROID__)
 #define SSAO_NOISE_DIM 8
@@ -41,23 +27,15 @@ public:
 		vks::Texture2D ssaoNoise;
 	} textures;
 
-	// Vertex layout for the models
-	vks::VertexLayout vertexLayout = vks::VertexLayout({
-		vks::VERTEX_COMPONENT_POSITION,
-		vks::VERTEX_COMPONENT_UV,
-		vks::VERTEX_COMPONENT_COLOR,
-		vks::VERTEX_COMPONENT_NORMAL,
-	});
+	vkglTF::Model scene;
 
-	struct {
-		vks::Model scene;
-	} models;
-
-	struct UBOSceneMatrices {
+	struct UBOSceneParams {
 		glm::mat4 projection;
 		glm::mat4 model;
 		glm::mat4 view;
-	} uboSceneMatrices;
+		float nearPlane = 0.1f;
+		float farPlane = 64.0f;
+	} uboSceneParams;
 
 	struct UBOSSAOParams {
 		glm::mat4 projection;
@@ -97,7 +75,7 @@ public:
 	} descriptorSetLayouts;
 
 	struct {
-		vks::Buffer sceneMatrices;
+		vks::Buffer sceneParams;
 		vks::Buffer ssaoKernel;
 		vks::Buffer ssaoParams;
 	} uniformBuffers;
@@ -146,15 +124,13 @@ public:
 	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 	{
 		title = "Screen space ambient occlusion";
-		settings.overlay = true;
 		camera.type = Camera::CameraType::firstperson;
-		camera.movementSpeed = 5.0f;
 #ifndef __ANDROID__
 		camera.rotationSpeed = 0.25f;
 #endif
-		camera.position = { 7.5f, -6.75f, 0.0f };
-		camera.setRotation(glm::vec3(5.0f, 90.0f, 0.0f));
-		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 64.0f);
+		camera.position = { 1.0f, 0.75f, 0.0f };
+		camera.setRotation(glm::vec3(0.0f, 90.0f, 0.0f));
+		camera.setPerspective(60.0f, (float)width / (float)height, uboSceneParams.nearPlane, uboSceneParams.farPlane);
 	}
 
 	~VulkanExample()
@@ -189,15 +165,17 @@ public:
 		vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.ssaoBlur, nullptr);
 		vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.composition, nullptr);
 
-		// Meshes
-		models.scene.destroy();
-
 		// Uniform buffers
-		uniformBuffers.sceneMatrices.destroy();
+		uniformBuffers.sceneParams.destroy();
 		uniformBuffers.ssaoKernel.destroy();
 		uniformBuffers.ssaoParams.destroy();
 
 		textures.ssaoNoise.destroy();
+	}
+
+	void getEnabledFeatures()
+	{
+		enabledFeatures.samplerAnisotropy = deviceFeatures.samplerAnisotropy;
 	}
 
 	// Create a frame buffer attachment
@@ -209,19 +187,18 @@ public:
 		uint32_t height)
 	{
 		VkImageAspectFlags aspectMask = 0;
-		VkImageLayout imageLayout;
 
 		attachment->format = format;
 
 		if (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
 		{
 			aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-			imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		}
 		if (usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
 		{
-			aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-			imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+			aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+			if (format >= VK_FORMAT_D16_UNORM_S8_UINT)
+				aspectMask |=VK_IMAGE_ASPECT_STENCIL_BIT;
 		}
 
 		assert(aspectMask > 0);
@@ -508,18 +485,14 @@ public:
 
 	void loadAssets()
 	{
-		vks::ModelCreateInfo modelCreateInfo;
-		modelCreateInfo.scale = glm::vec3(0.5f);
-		modelCreateInfo.uvscale = glm::vec2(1.0f);
-		modelCreateInfo.center = glm::vec3(0.0f, 0.0f, 0.0f);
-		models.scene.loadFromFile(getAssetPath() + "models/sibenik/sibenik.dae", vertexLayout, &modelCreateInfo, vulkanDevice, queue);
+		vkglTF::descriptorBindingFlags  = vkglTF::DescriptorBindingFlags::ImageBaseColor;
+		const uint32_t gltfLoadingFlags = vkglTF::FileLoadingFlags::FlipY | vkglTF::FileLoadingFlags::PreTransformVertices;
+		scene.loadFromFile(getAssetPath() + "models/sponza/sponza.gltf", vulkanDevice, queue, gltfLoadingFlags);
 	}
 
 	void buildCommandBuffers()
 	{
 		VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-
-		VkDeviceSize offsets[1] = { 0 };
 
 		for (int32_t i = 0; i < drawCmdBuffers.size(); ++i)
 		{
@@ -529,7 +502,7 @@ public:
 				Offscreen SSAO generation
 			*/
 			{
-				// Clear values for all attachments written in the fragment sahder
+				// Clear values for all attachments written in the fragment shader
 				std::vector<VkClearValue> clearValues(4);
 				clearValues[0].color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
 				clearValues[1].color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
@@ -559,9 +532,7 @@ public:
 				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.offscreen);
 
 				vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.gBuffer, 0, 1, &descriptorSets.floor, 0, NULL);
-				vkCmdBindVertexBuffers(drawCmdBuffers[i], 0, 1, &models.scene.vertices.buffer, offsets);
-				vkCmdBindIndexBuffer(drawCmdBuffers[i], models.scene.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
-				vkCmdDrawIndexed(drawCmdBuffers[i], models.scene.indexCount, 1, 0, 0, 0);
+				scene.draw(drawCmdBuffers[i], vkglTF::RenderFlags::BindImages, pipelineLayouts.gBuffer);
 
 				vkCmdEndRenderPass(drawCmdBuffers[i]);
 
@@ -679,19 +650,22 @@ public:
 
 		// G-Buffer creation (offscreen scene rendering)
 		setLayoutBindings = {
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0),								// VS UBO
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1),						// FS Color
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),	// VS + FS Parameter UBO
 		};
 		setLayoutCreateInfo = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings.data(), static_cast<uint32_t>(setLayoutBindings.size()));
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &setLayoutCreateInfo, nullptr, &descriptorSetLayouts.gBuffer));
-		pipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayouts.gBuffer;
+
+		const std::vector<VkDescriptorSetLayout> setLayouts = { descriptorSetLayouts.gBuffer, vkglTF::descriptorSetLayoutImage };
+		pipelineLayoutCreateInfo.pSetLayouts = setLayouts.data();
+		pipelineLayoutCreateInfo.setLayoutCount = 2;
 		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayouts.gBuffer));
 		descriptorAllocInfo.pSetLayouts = &descriptorSetLayouts.gBuffer;
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorAllocInfo, &descriptorSets.floor));
 		writeDescriptorSets = {
-			vks::initializers::writeDescriptorSet(descriptorSets.floor, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.sceneMatrices.descriptor),
+			vks::initializers::writeDescriptorSet(descriptorSets.floor, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.sceneParams.descriptor),
 		};
 		vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
+		pipelineLayoutCreateInfo.setLayoutCount = 1;
 
 		// SSAO Generation
 		setLayoutBindings = {
@@ -774,7 +748,7 @@ public:
 	void preparePipelines()
 	{
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
-		VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE, 0);
+		VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
 		VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
 		VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
 		VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
@@ -784,27 +758,7 @@ public:
 		VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
 		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
 
-		// Vertex input state for scene rendering
-		const std::vector<VkVertexInputBindingDescription> vertexInputBindings = {
-			vks::initializers::vertexInputBindingDescription(0, vertexLayout.stride(), VK_VERTEX_INPUT_RATE_VERTEX),
-		};
-		const std::vector<VkVertexInputAttributeDescription> vertexInputAttributes = {
-			vks::initializers::vertexInputAttributeDescription(0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0),					// Location 0: Position
-			vks::initializers::vertexInputAttributeDescription(0, 1, VK_FORMAT_R32G32_SFLOAT, sizeof(float) * 3),		// Location 1: UV
-			vks::initializers::vertexInputAttributeDescription(0, 2, VK_FORMAT_R32G32B32_SFLOAT, sizeof(float) * 5),	// Location 2: Color
-			vks::initializers::vertexInputAttributeDescription(0, 3, VK_FORMAT_R32G32B32_SFLOAT, sizeof(float) * 8),	// Location 3: Normal
-		};
-		VkPipelineVertexInputStateCreateInfo vertexInputState = vks::initializers::pipelineVertexInputStateCreateInfo();
-		vertexInputState.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexInputBindings.size());
-		vertexInputState.pVertexBindingDescriptions = vertexInputBindings.data();
-		vertexInputState.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributes.size());
-		vertexInputState.pVertexAttributeDescriptions = vertexInputAttributes.data();
-
-		// Empty vertex input state for fullscreen passes
-		VkPipelineVertexInputStateCreateInfo emptyVertexInputState = vks::initializers::pipelineVertexInputStateCreateInfo();
-
 		VkGraphicsPipelineCreateInfo pipelineCreateInfo = vks::initializers::pipelineCreateInfo( pipelineLayouts.composition, renderPass, 0);
-		pipelineCreateInfo.pVertexInputState = &emptyVertexInputState;
 		pipelineCreateInfo.pInputAssemblyState = &inputAssemblyState;
 		pipelineCreateInfo.pRasterizationState = &rasterizationState;
 		pipelineCreateInfo.pColorBlendState = &colorBlendState;
@@ -815,41 +769,47 @@ public:
 		pipelineCreateInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
 		pipelineCreateInfo.pStages = shaderStages.data();
 
+		// Empty vertex input state for fullscreen passes
+		VkPipelineVertexInputStateCreateInfo emptyVertexInputState = vks::initializers::pipelineVertexInputStateCreateInfo();
+		pipelineCreateInfo.pVertexInputState = &emptyVertexInputState;
+		rasterizationState.cullMode = VK_CULL_MODE_FRONT_BIT;
+
+		// Final composition pipeline
 		shaderStages[0] = loadShader(getShadersPath() + "ssao/fullscreen.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
 		shaderStages[1] = loadShader(getShadersPath() + "ssao/composition.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.composition));
 
-		// SSAO Pass
+		// SSAO generation pipeline
 		{
-			shaderStages[1] = loadShader(getShadersPath() + "ssao/ssao.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-			// Set constant parameters via specialization constants
-			std::array<VkSpecializationMapEntry, 2> specializationMapEntries;
-			specializationMapEntries[0] = vks::initializers::specializationMapEntry(0, 0, sizeof(uint32_t));				// SSAO Kernel size
-			specializationMapEntries[1] = vks::initializers::specializationMapEntry(1, sizeof(uint32_t), sizeof(float));	// SSAO radius
-			struct {
+			pipelineCreateInfo.renderPass = frameBuffers.ssao.renderPass;
+			pipelineCreateInfo.layout = pipelineLayouts.ssao;
+			// SSAO Kernel size and radius are constant for this pipeline, so we set them using specialization constants
+			struct SpecializationData {
 				uint32_t kernelSize = SSAO_KERNEL_SIZE;
 				float radius = SSAO_RADIUS;
 			} specializationData;
+			std::array<VkSpecializationMapEntry, 2> specializationMapEntries = {
+				vks::initializers::specializationMapEntry(0, offsetof(SpecializationData, kernelSize), sizeof(SpecializationData::kernelSize)),
+				vks::initializers::specializationMapEntry(1, offsetof(SpecializationData, radius), sizeof(SpecializationData::radius))
+			};
 			VkSpecializationInfo specializationInfo = vks::initializers::specializationInfo(2, specializationMapEntries.data(), sizeof(specializationData), &specializationData);
+			shaderStages[1] = loadShader(getShadersPath() + "ssao/ssao.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 			shaderStages[1].pSpecializationInfo = &specializationInfo;
-			pipelineCreateInfo.renderPass = frameBuffers.ssao.renderPass;
-			pipelineCreateInfo.layout = pipelineLayouts.ssao;
 			VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.ssao));
 		}
 
-		// SSAO blur pass
+		// SSAO blur pipeline
 		{
-			shaderStages[1] = loadShader(getShadersPath() + "ssao/blur.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 			pipelineCreateInfo.renderPass = frameBuffers.ssaoBlur.renderPass;
 			pipelineCreateInfo.layout = pipelineLayouts.ssaoBlur;
+			shaderStages[1] = loadShader(getShadersPath() + "ssao/blur.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 			VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.ssaoBlur));
 		}
 
-		// Fill G-Buffer
+		// Fill G-Buffer pipeline
 		{
-			shaderStages[0] = loadShader(getShadersPath() + "ssao/gbuffer.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-			shaderStages[1] = loadShader(getShadersPath() + "ssao/gbuffer.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-			pipelineCreateInfo.pVertexInputState = &vertexInputState;
+			// Vertex input state from glTF model loader
+			pipelineCreateInfo.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::UV, vkglTF::VertexComponent::Color, vkglTF::VertexComponent::Normal });
 			pipelineCreateInfo.renderPass = frameBuffers.offscreen.renderPass;
 			pipelineCreateInfo.layout = pipelineLayouts.gBuffer;
 			// Blend attachment states required for all color attachments
@@ -862,6 +822,9 @@ public:
 			};
 			colorBlendState.attachmentCount = static_cast<uint32_t>(blendAttachmentStates.size());
 			colorBlendState.pAttachments = blendAttachmentStates.data();
+			rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
+			shaderStages[0] = loadShader(getShadersPath() + "ssao/gbuffer.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+			shaderStages[1] = loadShader(getShadersPath() + "ssao/gbuffer.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 			VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.offscreen));
 		}
 	}
@@ -878,8 +841,8 @@ public:
 		vulkanDevice->createBuffer(
 			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			&uniformBuffers.sceneMatrices,
-			sizeof(uboSceneMatrices));
+			&uniformBuffers.sceneParams,
+			sizeof(uboSceneParams));
 
 		// SSAO parameters
 		vulkanDevice->createBuffer(
@@ -928,13 +891,13 @@ public:
 
 	void updateUniformBufferMatrices()
 	{
-		uboSceneMatrices.projection = camera.matrices.perspective;
-		uboSceneMatrices.view = camera.matrices.view;
-		uboSceneMatrices.model = glm::mat4(1.0f);
+		uboSceneParams.projection = camera.matrices.perspective;
+		uboSceneParams.view = camera.matrices.view;
+		uboSceneParams.model = glm::mat4(1.0f);
 
-		VK_CHECK_RESULT(uniformBuffers.sceneMatrices.map());
-		uniformBuffers.sceneMatrices.copyTo(&uboSceneMatrices, sizeof(uboSceneMatrices));
-		uniformBuffers.sceneMatrices.unmap();
+		VK_CHECK_RESULT(uniformBuffers.sceneParams.map());
+		uniformBuffers.sceneParams.copyTo(&uboSceneParams, sizeof(uboSceneParams));
+		uniformBuffers.sceneParams.unmap();
 	}
 
 	void updateUniformBufferSSAOParams()
@@ -970,9 +933,14 @@ public:
 
 	virtual void render()
 	{
-		if (!prepared)
+		if (!prepared) {
 			return;
+		}
 		draw();
+		if (camera.updated) {
+			updateUniformBufferMatrices();
+			updateUniformBufferSSAOParams();
+		}
 	}
 
 	virtual void viewChanged()

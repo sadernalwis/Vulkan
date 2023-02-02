@@ -6,44 +6,23 @@
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <vector>
-#include <thread>
-#include <random>
-
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
-#include <vulkan/vulkan.h>
 #include "vulkanexamplebase.h"
 
 #include "threadpool.hpp"
 #include "frustum.hpp"
 
-#include "VulkanModel.hpp"
+#include "VulkanglTFModel.h"
 
 #define ENABLE_VALIDATION false
 
 class VulkanExample : public VulkanExampleBase
 {
 public:
-	bool displaySkybox = true;
-
-	// Vertex layout for the models
-	vks::VertexLayout vertexLayout = vks::VertexLayout({
-		vks::VERTEX_COMPONENT_POSITION,
-		vks::VERTEX_COMPONENT_NORMAL,
-		vks::VERTEX_COMPONENT_COLOR,
-	});
+	bool displayStarSphere = true;
 
 	struct {
-		vks::Model ufo;
-		vks::Model skysphere;
+		vkglTF::Model ufo;
+		vkglTF::Model starSphere;
 	} models;
 
 	// Shared matrices used for thread push constant blocks
@@ -61,7 +40,7 @@ public:
 
 	VkCommandBuffer primaryCommandBuffer;
 
-	// Secondary scene command buffers used to store backgdrop and user interface
+	// Secondary scene command buffers used to store backdrop and user interface
 	struct SecondaryCommandBuffers {
 		VkCommandBuffer background;
 		VkCommandBuffer ui;
@@ -111,10 +90,6 @@ public:
 	// presenting to the swap chain
 	VkFence renderFence = {};
 
-	// Max. dimension of the ufo mesh for use as the sphere
-	// radius for frustum culling
-	float objectSphereDim;
-
 	// View frustum for culling invisible objects
 	vks::Frustum frustum;
 
@@ -128,8 +103,7 @@ public:
 		camera.setRotation(glm::vec3(0.0f));
 		camera.setRotationSpeed(0.5f);
 		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);
-		settings.overlay = true;
-		// Get number of max. concurrrent threads
+		// Get number of max. concurrent threads
 		numThreads = std::thread::hardware_concurrency();
 		assert(numThreads > 0);
 #if defined(__ANDROID__)
@@ -150,9 +124,6 @@ public:
 		vkDestroyPipeline(device, pipelines.starsphere, nullptr);
 
 		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-
-		models.ufo.destroy();
-		models.skysphere.destroy();
 
 		for (auto& thread : threadData) {
 			vkFreeCommandBuffers(device, thread.commandPool, thread.commandBuffer.size(), thread.commandBuffer.data());
@@ -237,8 +208,8 @@ public:
 		ThreadData *thread = &threadData[threadIndex];
 		ObjectData *objectData = &thread->objectData[cmdBufferIndex];
 
-		// Check visibility against view frustum
-		objectData->visible = frustum.checkSphere(objectData->pos, objectSphereDim * 0.5f);
+		// Check visibility against view frustum using a simple sphere check based on the radius of the mesh
+		objectData->visible = frustum.checkSphere(objectData->pos, models.ufo.dimensions.radius * 0.5f);
 
 		if (!objectData->visible)
 		{
@@ -294,7 +265,7 @@ public:
 		VkDeviceSize offsets[1] = { 0 };
 		vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &models.ufo.vertices.buffer, offsets);
 		vkCmdBindIndexBuffer(cmdBuffer, models.ufo.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
-		vkCmdDrawIndexed(cmdBuffer, models.ufo.indexCount, 1, 0, 0, 0);
+		vkCmdDrawIndexed(cmdBuffer, models.ufo.indices.count, 1, 0, 0, 0);
 
 		VK_CHECK_RESULT(vkEndCommandBuffer(cmdBuffer));
 	}
@@ -322,6 +293,7 @@ public:
 
 		glm::mat4 mvp = matrices.projection * matrices.view;
 		mvp[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+		mvp = glm::scale(mvp, glm::vec3(2.0f));
 
 		vkCmdPushConstants(
 			secondaryCommandBuffers.background,
@@ -331,11 +303,8 @@ public:
 			sizeof(mvp),
 			&mvp);
 
-		VkDeviceSize offsets[1] = { 0 };
-		vkCmdBindVertexBuffers(secondaryCommandBuffers.background, 0, 1, &models.skysphere.vertices.buffer, offsets);
-		vkCmdBindIndexBuffer(secondaryCommandBuffers.background, models.skysphere.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
-		vkCmdDrawIndexed(secondaryCommandBuffers.background, models.skysphere.indexCount, 1, 0, 0, 0);
-
+		models.starSphere.draw(secondaryCommandBuffers.background);
+		
 		VK_CHECK_RESULT(vkEndCommandBuffer(secondaryCommandBuffers.background));
 
 		/*
@@ -352,9 +321,7 @@ public:
 
 		vkCmdBindPipeline(secondaryCommandBuffers.ui, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.starsphere);
 
-		if (settings.overlay) {
-			drawUI(secondaryCommandBuffers.ui);
-		}
+		drawUI(secondaryCommandBuffers.ui);
 
 		VK_CHECK_RESULT(vkEndCommandBuffer(secondaryCommandBuffers.ui));
 	}
@@ -400,7 +367,7 @@ public:
 		// Update secondary sene command buffers
 		updateSecondaryCommandBuffers(inheritanceInfo);
 
-		if (displaySkybox) {
+		if (displayStarSphere) {
 			commandBuffers.push_back(secondaryCommandBuffers.background);
 		}
 
@@ -442,9 +409,9 @@ public:
 
 	void loadAssets()
 	{
-		models.ufo.loadFromFile(getAssetPath() + "models/retroufo_red_lowpoly.dae", vertexLayout, 0.12f, vulkanDevice, queue);
-		models.skysphere.loadFromFile(getAssetPath() + "models/sphere.obj", vertexLayout, 1.0f, vulkanDevice, queue);
-		objectSphereDim = std::max(std::max(models.ufo.dim.size.x, models.ufo.dim.size.y), models.ufo.dim.size.z);
+		const uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::PreMultiplyVertexColors | vkglTF::FileLoadingFlags::FlipY;
+		models.ufo.loadFromFile(getAssetPath() + "models/retroufo_red_lowpoly.gltf",vulkanDevice, queue,glTFLoadingFlags);
+		models.starSphere.loadFromFile(getAssetPath() + "models/sphere.gltf", vulkanDevice, queue, glTFLoadingFlags);
 	}
 
 	void setupPipelineLayout()
@@ -468,53 +435,15 @@ public:
 
 	void preparePipelines()
 	{
-		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState =
-			vks::initializers::pipelineInputAssemblyStateCreateInfo(
-				VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-				0,
-				VK_FALSE);
-
-		VkPipelineRasterizationStateCreateInfo rasterizationState =
-			vks::initializers::pipelineRasterizationStateCreateInfo(
-				VK_POLYGON_MODE_FILL,
-				VK_CULL_MODE_BACK_BIT,
-				VK_FRONT_FACE_CLOCKWISE,
-				0);
-
-		VkPipelineColorBlendAttachmentState blendAttachmentState =
-			vks::initializers::pipelineColorBlendAttachmentState(
-				0xf,
-				VK_FALSE);
-
-		VkPipelineColorBlendStateCreateInfo colorBlendState =
-			vks::initializers::pipelineColorBlendStateCreateInfo(
-				1,
-				&blendAttachmentState);
-
-		VkPipelineDepthStencilStateCreateInfo depthStencilState =
-			vks::initializers::pipelineDepthStencilStateCreateInfo(
-				VK_TRUE,
-				VK_TRUE,
-				VK_COMPARE_OP_LESS_OR_EQUAL);
-
-		VkPipelineViewportStateCreateInfo viewportState =
-			vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
-
-		VkPipelineMultisampleStateCreateInfo multisampleState =
-			vks::initializers::pipelineMultisampleStateCreateInfo(
-				VK_SAMPLE_COUNT_1_BIT,
-				0);
-
-		std::vector<VkDynamicState> dynamicStateEnables = {
-			VK_DYNAMIC_STATE_VIEWPORT,
-			VK_DYNAMIC_STATE_SCISSOR
-		};
-		VkPipelineDynamicStateCreateInfo dynamicState =
-			vks::initializers::pipelineDynamicStateCreateInfo(
-				dynamicStateEnables.data(),
-				dynamicStateEnables.size(),
-				0);
-
+		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
+		VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
+		VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
+		VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
+		VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
+		VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
+		VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT, 0);
+		std::vector<VkDynamicState> dynamicStateEnables = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+		VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
 		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
 
 		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass, 0);
@@ -527,24 +456,7 @@ public:
 		pipelineCI.pDynamicState = &dynamicState;
 		pipelineCI.stageCount = shaderStages.size();
 		pipelineCI.pStages = shaderStages.data();
-
-		// Vertex bindings and attributes
-		const std::vector<VkVertexInputBindingDescription> vertexInputBindings = {
-			vks::initializers::vertexInputBindingDescription(0, vertexLayout.stride(), VK_VERTEX_INPUT_RATE_VERTEX),
-		};
-
-		const std::vector<VkVertexInputAttributeDescription> vertexInputAttributes = {
-			vks::initializers::vertexInputAttributeDescription(0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0),					// Location 0: Position
-			vks::initializers::vertexInputAttributeDescription(0, 1, VK_FORMAT_R32G32B32_SFLOAT, sizeof(float) * 3),	// Location 1: Normal
-			vks::initializers::vertexInputAttributeDescription(0, 2, VK_FORMAT_R32G32B32_SFLOAT, sizeof(float) * 6),	// Location 2: Color
-		};
-		VkPipelineVertexInputStateCreateInfo vertexInputStateCI = vks::initializers::pipelineVertexInputStateCreateInfo();
-		vertexInputStateCI.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexInputBindings.size());
-		vertexInputStateCI.pVertexBindingDescriptions = vertexInputBindings.data();
-		vertexInputStateCI.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributes.size());
-		vertexInputStateCI.pVertexAttributeDescriptions = vertexInputAttributes.data();
-
-		pipelineCI.pVertexInputState = &vertexInputStateCI;
+		pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::Color});
 
 		// Object rendering pipeline
 		shaderStages[0] = loadShader(getShadersPath() + "multithreading/phong.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
@@ -607,6 +519,10 @@ public:
 		if (!prepared)
 			return;
 		draw();
+		if (camera.updated)
+		{
+			updateMatrices();
+		}
 	}
 
 	virtual void viewChanged()
@@ -620,7 +536,7 @@ public:
 			overlay->text("Active threads: %d", numThreads);
 		}
 		if (overlay->header("Settings")) {
-			overlay->checkBox("Skybox", &displaySkybox);
+			overlay->checkBox("Stars", &displayStarSphere);
 		}
 
 	}

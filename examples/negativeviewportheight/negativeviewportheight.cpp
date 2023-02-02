@@ -8,21 +8,7 @@
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <vector>
-
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
-
-#include <vulkan/vulkan.h>
 #include "vulkanexamplebase.h"
-#include "VulkanTexture.hpp"
 
 #define ENABLE_VALIDATION false
 
@@ -66,7 +52,6 @@ public:
 	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 	{
 		title = "Negative Viewport height";
-		settings.overlay = true;
 		// [POI] VK_KHR_MAINTENANCE1 is required for using negative viewport heights
 		// Note: This is core as of Vulkan 1.1. So if you target 1.1 you don't have to explicitly enable this
 		enabledDeviceExtensions.push_back(VK_KHR_MAINTENANCE1_EXTENSION_NAME);
@@ -318,10 +303,10 @@ public:
 			if (overlay->checkBox("Negative viewport height", &negativeViewport)) {
 				buildCommandBuffers();
 			}
-			if (overlay->sliderInt("offfset x", &offsetx, -(int32_t)width, (int32_t)width)) {
+			if (overlay->sliderInt("offset x", &offsetx, -(int32_t)width, (int32_t)width)) {
 				buildCommandBuffers();
 			}
-			if (overlay->sliderInt("offfset y", &offsety, -(int32_t)height, (int32_t)height)) {
+			if (overlay->sliderInt("offset y", &offsety, -(int32_t)height, (int32_t)height)) {
 				buildCommandBuffers();
 			}
 		}

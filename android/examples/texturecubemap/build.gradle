@@ -10,7 +10,7 @@ android {
         versionCode 1
         versionName "1.0"
         ndk {
-            abiFilters "armeabi-v7a"
+            abiFilters "arm64-v8a"
         }
         externalNativeBuild {
             cmake {
@@ -57,37 +57,37 @@ task copyTask {
     copy {
        from '../../../data/models'
        into 'assets/models'
-       include 'sphere.obj'
+       include 'sphere.gltf'
     }
 
     copy {
        from '../../../data/models'
        into 'assets/models'
-       include 'teapot.dae'
+       include 'teapot.gltf'
     }
 
     copy {
        from '../../../data/models'
        into 'assets/models'
-       include 'torusknot.obj'
+       include 'torusknot.gltf'
     }
 
     copy {
        from '../../../data/models'
        into 'assets/models'
-       include 'cube.obj'
+       include 'cube.gltf'
     }
 
     copy {
         from '../../../data/models'
         into 'assets/models'
-        include 'venus.fbx'
+        include 'venus.gltf'
     }
 
     copy {
        from '../../../data/textures'
        into 'assets/textures'
-       include 'cubemap_yokohama*.ktx'
+       include 'cubemap_yokohama_rgba.ktx'
     }
 
 

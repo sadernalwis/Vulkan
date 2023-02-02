@@ -3,26 +3,12 @@
 *
 * Updated compute shader by Lukas Bergdoll (https://github.com/Voultapher)
 *
-* Copyright (C) 2016 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2016-2021 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <vector>
-#include <random>
-
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
-#include <vulkan/vulkan.h>
 #include "vulkanexamplebase.h"
-#include "VulkanTexture.hpp"
 
 #define VERTEX_BUFFER_BIND_ID 0
 #define ENABLE_VALIDATION false
@@ -86,13 +72,12 @@ public:
 	struct Particle {
 		glm::vec2 pos;								// Particle position
 		glm::vec2 vel;								// Particle velocity
-		glm::vec4 gradientPos;						// Texture coordiantes for the gradient ramp map
+		glm::vec4 gradientPos;						// Texture coordinates for the gradient ramp map
 	};
 
 	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 	{
 		title = "Compute shader particle system";
-		settings.overlay = true;
 	}
 
 	~VulkanExample()
@@ -101,6 +86,7 @@ public:
 		vkDestroyPipeline(device, graphics.pipeline, nullptr);
 		vkDestroyPipelineLayout(device, graphics.pipelineLayout, nullptr);
 		vkDestroyDescriptorSetLayout(device, graphics.descriptorSetLayout, nullptr);
+		vkDestroySemaphore(device, graphics.semaphore, nullptr);
 
 		// Compute
 		compute.storageBuffer.destroy();
@@ -163,7 +149,7 @@ public:
 
 				vkCmdPipelineBarrier(
 					drawCmdBuffers[i],
-					VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+					VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
 					VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
 					0,
 					0, nullptr,
@@ -182,15 +168,6 @@ public:
 
 			vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphics.pipeline);
 			vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphics.pipelineLayout, 0, 1, &graphics.descriptorSet, 0, NULL);
-
-			glm::vec2 screendim = glm::vec2((float)width, (float)height);
-			vkCmdPushConstants(
-					drawCmdBuffers[i],
-					graphics.pipelineLayout,
-					VK_SHADER_STAGE_VERTEX_BIT,
-					0,
-					sizeof(glm::vec2),
-					&screendim);
 
 			VkDeviceSize offsets[1] = { 0 };
 			vkCmdBindVertexBuffers(drawCmdBuffers[i], VERTEX_BUFFER_BIND_ID, 1, &compute.storageBuffer.buffer, offsets);
@@ -219,7 +196,7 @@ public:
 				vkCmdPipelineBarrier(
 					drawCmdBuffers[i],
 					VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-					VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+					VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
 					0,
 					0, nullptr,
 					1, &buffer_barrier,
@@ -257,7 +234,7 @@ public:
 
 			vkCmdPipelineBarrier(
 				compute.commandBuffer,
-				VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
 				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 				0,
 				0, nullptr,
@@ -290,7 +267,7 @@ public:
 			vkCmdPipelineBarrier(
 				compute.commandBuffer,
 				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-				VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+				VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
 				0,
 				0, nullptr,
 				1, &buffer_barrier,
@@ -359,7 +336,7 @@ public:
 			vkCmdPipelineBarrier(
 				copyCmd,
 				VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
 				0,
 				0, nullptr,
 				1, &buffer_barrier,
@@ -446,15 +423,6 @@ public:
 			vks::initializers::pipelineLayoutCreateInfo(
 				&graphics.descriptorSetLayout,
 				1);
-
-		VkPushConstantRange pushConstantRange =
-			vks::initializers::pushConstantRange(
-				VK_SHADER_STAGE_VERTEX_BIT,
-				sizeof(glm::vec2),
-				0);
-
-		pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-		pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
 
 		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &graphics.pipelineLayout));
 	}
@@ -584,6 +552,13 @@ public:
 		// Semaphore for compute & graphics sync
 		VkSemaphoreCreateInfo semaphoreCreateInfo = vks::initializers::semaphoreCreateInfo();
 		VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &graphics.semaphore));
+		
+		// Signal the semaphore
+		VkSubmitInfo submitInfo = vks::initializers::submitInfo();
+		submitInfo.signalSemaphoreCount = 1;
+		submitInfo.pSignalSemaphores = &graphics.semaphore;
+		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+		VK_CHECK_RESULT(vkQueueWaitIdle(queue));
 	}
 
 	void prepareCompute()
@@ -669,17 +644,12 @@ public:
 		VkSemaphoreCreateInfo semaphoreCreateInfo = vks::initializers::semaphoreCreateInfo();
 		VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &compute.semaphore));
 
-		// Signal the semaphore
-		VkSubmitInfo submitInfo = vks::initializers::submitInfo();
-		submitInfo.signalSemaphoreCount = 1;
-		submitInfo.pSignalSemaphores = &compute.semaphore;
-		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
-		VK_CHECK_RESULT(vkQueueWaitIdle(queue));
-
 		// Build a single command buffer containing the compute dispatch commands
 		buildComputeCommandBuffer();
 
+		// SRS - By reordering compute and graphics within draw(), the following code is no longer needed:
 		// If graphics and compute queue family indices differ, acquire and immediately release the storage buffer, so that the initial acquire from the graphics command buffers are matched up properly
+		/*
 		if (graphics.queueFamilyIndex != compute.queueFamilyIndex)
 		{
 			// Create a transient command buffer for setting up the initial buffer transfer state
@@ -729,6 +699,7 @@ public:
 
 			vulkanDevice->flushCommandBuffer(transferCmd, compute.queue, compute.commandPool);
 		}
+		*/
 	}
 
 	// Prepare and initialize uniform buffer containing shader uniforms
@@ -749,7 +720,7 @@ public:
 
 	void updateUniformBuffers()
 	{
-		compute.ubo.deltaT = frameTimer * 2.5f;
+		compute.ubo.deltaT = paused ? 0.0f : frameTimer * 2.5f;
 		if (!attachToCursor)
 		{
 			compute.ubo.destX = sin(glm::radians(timer * 360.0f)) * 0.75f;
@@ -768,6 +739,20 @@ public:
 
 	void draw()
 	{
+		// Wait for rendering finished
+		VkPipelineStageFlags waitStageMask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+
+		// Submit compute commands
+		VkSubmitInfo computeSubmitInfo = vks::initializers::submitInfo();
+		computeSubmitInfo.commandBufferCount = 1;
+		computeSubmitInfo.pCommandBuffers = &compute.commandBuffer;
+		computeSubmitInfo.waitSemaphoreCount = 1;
+		computeSubmitInfo.pWaitSemaphores = &graphics.semaphore;
+		computeSubmitInfo.pWaitDstStageMask = &waitStageMask;
+		computeSubmitInfo.signalSemaphoreCount = 1;
+		computeSubmitInfo.pSignalSemaphores = &compute.semaphore;
+		VK_CHECK_RESULT(vkQueueSubmit(compute.queue, 1, &computeSubmitInfo, VK_NULL_HANDLE));
+
 		VulkanExampleBase::prepareFrame();
 
 		VkPipelineStageFlags graphicsWaitStageMasks[] = { VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
@@ -785,21 +770,6 @@ public:
 		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
 
 		VulkanExampleBase::submitFrame();
-
-		// Wait for rendering finished
-		VkPipelineStageFlags waitStageMask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-
-		// Submit compute commands
-		VkSubmitInfo computeSubmitInfo = vks::initializers::submitInfo();
-		computeSubmitInfo.commandBufferCount = 1;
-		computeSubmitInfo.pCommandBuffers = &compute.commandBuffer;
-		computeSubmitInfo.waitSemaphoreCount = 1;
-		computeSubmitInfo.pWaitSemaphores = &graphics.semaphore;
-		computeSubmitInfo.pWaitDstStageMask = &waitStageMask;
-		computeSubmitInfo.signalSemaphoreCount = 1;
-		computeSubmitInfo.pSignalSemaphores = &compute.semaphore;
-		VK_CHECK_RESULT(vkQueueSubmit(compute.queue, 1, &computeSubmitInfo, VK_NULL_HANDLE));
-
 	}
 
 	void prepare()

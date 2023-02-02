@@ -8,23 +8,7 @@
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sstream>
-#include <assert.h>
-#include <vector>
-#include <array>
-
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
-#include <vulkan/vulkan.h>
 #include "vulkanexamplebase.h"
-#include "VulkanTexture.hpp"
-#include "VulkanBuffer.hpp"
 
 #define VERTEX_BUFFER_BIND_ID 0
 #define ENABLE_VALIDATION false
@@ -116,7 +100,6 @@ public:
 		camera.setPosition(glm::vec3(0.0f, 0.0f, -2.0f));
 		camera.setRotation(glm::vec3(0.0f));
 		camera.setPerspective(splitScreen ? 30.0f : 45.0f, (float)width / (float)(height * ((splitScreen) ? 0.5f : 1.0f)), 1.0f, 256.0f);
-		settings.overlay = true;
 	}
 
 	~VulkanExample()
@@ -141,7 +124,7 @@ public:
 		uniformBuffers.fs.destroy();
 	}
 
-	// Basic parser fpr AngelCode bitmap font format files
+	// Basic parser for AngelCode bitmap font format files
 	// See http://www.angelcode.com/products/bmfont/doc/file_format.html for details
 	void parsebmFont()
 	{
@@ -285,7 +268,6 @@ public:
 			float dimx = 1.0f * charw;
 			float charh = ((float)(charInfo->height) / 36.0f);
 			float dimy = 1.0f * charh;
-			posy = 1.0f - charh;
 
 			float us = charInfo->x / w;
 			float ue = (charInfo->x + charInfo->width) / w;
@@ -294,6 +276,8 @@ public:
 
 			float xo = charInfo->xoffset / 36.0f;
 			float yo = charInfo->yoffset / 36.0f;
+
+			posy = yo;
 
 			vertices.push_back({ { posx + dimx + xo,  posy + dimy, 0.0f }, { ue, te } });
 			vertices.push_back({ { posx + xo,         posy + dimy, 0.0f }, { us, te } });
@@ -319,7 +303,7 @@ public:
 			v.pos[1] -= 0.5f;
 		}
 
-		// Generate host accesible buffers for the text vertices and indices and upload the data
+		// Generate host accessible buffers for the text vertices and indices and upload the data
 
 		VK_CHECK_RESULT(vulkanDevice->createBuffer(
 			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
@@ -592,7 +576,7 @@ public:
 			&uniformBuffers.vs,
 			sizeof(uboVS)));
 
-		// Fragment sahder uniform buffer block (Contains font rendering parameters)
+		// Fragment shader uniform buffer block (Contains font rendering parameters)
 		VK_CHECK_RESULT(vulkanDevice->createBuffer(
 			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -624,7 +608,7 @@ public:
 	{
 		VulkanExampleBase::prepareFrame();
 
-		// Command buffer to be sumitted to the queue
+		// Command buffer to be submitted to the queue
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
 
@@ -659,6 +643,7 @@ public:
 
 	virtual void viewChanged()
 	{
+		camera.setPerspective(splitScreen ? 30.0f : 45.0f, (float)width / (float)(height * ((splitScreen) ? 0.5f : 1.0f)), 1.0f, 256.0f);
 		updateUniformBuffers();
 	}
 

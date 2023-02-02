@@ -1,5 +1,5 @@
 /*
-* Vulkan Example - Example for VK_EXT_debug_marker extension. To be used in conjuction with a debugging app like RenderDoc (https://renderdoc.org)
+* Vulkan Example - Example for VK_EXT_debug_marker extension. To be used in conjunction with a debugging app like RenderDoc (https://renderdoc.org)
 *
 * Copyright (C) by Sascha Willems - www.saschawillems.de
 *
@@ -8,25 +8,12 @@
 
 /*
  * Note: This sample is deprecated!
- * An updated version using VK_EXT_debug_utils along with an in-depth tutorial is available in the pfficial Khronos Vulkan Samples repository at
+ * An updated version using VK_EXT_debug_utils along with an in-depth tutorial is available in the official Khronos Vulkan Samples repository at
  * https://github.com/KhronosGroup/Vulkan-Samples/blob/master/samples/extensions/debug_utils.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <vector>
-
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
-#include <vulkan/vulkan.h>
 #include "vulkanexamplebase.h"
-#include "VulkanBuffer.hpp"
-#include "VulkanModel.hpp"
+#include "VulkanglTFModel.h"
 
 #define ENABLE_VALIDATION false
 
@@ -145,7 +132,7 @@ namespace DebugMarker
 	// End the current debug marker region
 	void endRegion(VkCommandBuffer cmdBuffer)
 	{
-		// Check for valid function (may not be present if not runnin in a debugging application)
+		// Check for valid function (may not be present if not running in a debugging application)
 		if (vkCmdDebugMarkerEnd)
 		{
 			vkCmdDebugMarkerEnd(cmdBuffer);
@@ -153,35 +140,26 @@ namespace DebugMarker
 	}
 };
 
-// Vertex layout for the models
-vks::VertexLayout vertexLayout = vks::VertexLayout({
-	vks::VERTEX_COMPONENT_POSITION,
-	vks::VERTEX_COMPONENT_NORMAL,
-	vks::VERTEX_COMPONENT_UV,
-	vks::VERTEX_COMPONENT_COLOR,
-});
-
 struct Scene {
 
-	vks::Model model;
+	vkglTF::Model model;
 	std::vector<std::string> modelPartNames;
 
 	void draw(VkCommandBuffer cmdBuffer)
 	{
-		VkDeviceSize offsets[1] = { 0 };
-		vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &model.vertices.buffer, offsets);
-		vkCmdBindIndexBuffer(cmdBuffer, model.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
-		for (auto i = 0; i < model.parts.size(); i++)
+		model.bindBuffers(cmdBuffer);
+		for (auto i = 0; i < model.nodes.size(); i++)
 		{
-			// Add debug marker for mesh name
-			DebugMarker::insert(cmdBuffer, "Draw \"" + modelPartNames[i] + "\"", glm::vec4(0.0f));
-			vkCmdDrawIndexed(cmdBuffer, model.parts[i].indexCount, 1, model.parts[i].indexBase, 0, 0);
+			// Add debug marker the name of this glTF node
+			DebugMarker::insert(cmdBuffer, "Draw \"" + model.nodes[i]->name + "\"", glm::vec4(0.0f));
+			model.drawNode(model.nodes[i], cmdBuffer);
 		}
 	}
 
 	void loadFromFile(std::string filename, vks::VulkanDevice* vulkanDevice, VkQueue queue)
 	{
-		model.loadFromFile(filename, vertexLayout, 1.0f, vulkanDevice, queue);
+		const uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::PreMultiplyVertexColors | vkglTF::FileLoadingFlags::FlipY;
+		model.loadFromFile(filename, vulkanDevice, queue, glTFLoadingFlags);
 	}
 };
 
@@ -239,7 +217,6 @@ public:
 	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 	{
 		title = "Debugging with VK_EXT_debug_marker";
-		settings.overlay = true;
 		camera.setRotation(glm::vec3(-4.35f, 16.25f, 0.0f));
 		camera.setRotationSpeed(0.5f);
 		camera.setPosition(glm::vec3(0.1f, 1.1f, -8.5f));
@@ -269,10 +246,6 @@ public:
 
 		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-
-		// Destroy and free mesh resources
-		scene.model.destroy();
-		sceneGlow.model.destroy();
 
 		uniformBuffer.destroy();
 
@@ -465,20 +438,10 @@ public:
 		DebugMarker::setObjectName(device, (uint64_t)offscreenPass.sampler, VK_DEBUG_REPORT_OBJECT_TYPE_SAMPLER_EXT, "Off-screen framebuffer default sampler");
 	}
 
-	void loadScene()
+	void loadAssets()
 	{
-		scene.loadFromFile(getAssetPath() + "models/treasure_smooth.dae", vulkanDevice, queue);
-		sceneGlow.loadFromFile(getAssetPath() + "models/treasure_glow.dae", vulkanDevice, queue);
-
-		// Name the meshes
-		// ASSIMP does not load mesh names from the COLLADA file used in this example so we need to set them manually
-		// These names are used in command buffer creation for setting debug markers
-		std::vector<std::string> names = { "hill", "crystals", "rocks", "cave", "tree", "mushroom stems", "blue mushroom caps", "red mushroom caps", "grass blades", "chest box", "chest fittings" };
-		for (size_t i = 0; i < names.size(); i++) {
-			scene.modelPartNames.push_back(names[i]);
-			sceneGlow.modelPartNames.push_back(names[i]);
-		}
-
+		scene.loadFromFile(getAssetPath() + "models/treasure_smooth.gltf", vulkanDevice, queue);
+		sceneGlow.loadFromFile(getAssetPath() + "models/treasure_glow.gltf", vulkanDevice, queue);
 		// Name the buffers for debugging
 		// Scene
 		DebugMarker::setObjectName(device, (uint64_t)scene.model.vertices.buffer, VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT, "Scene vertex buffer");
@@ -494,7 +457,6 @@ public:
 		VkClearValue clearValues[2];
 		VkViewport viewport;
 		VkRect2D scissor;
-		VkDeviceSize offsets[1] = { 0 };
 
 		for (int32_t i = 0; i < drawCmdBuffers.size(); ++i)
 		{
@@ -624,7 +586,6 @@ public:
 		}
 	}
 
-
 	void setupDescriptorPool()
 	{
 		// Example uses one ubo and one combined image sampler
@@ -672,7 +633,7 @@ public:
 	void preparePipelines()
 	{
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
-		VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE, 0);
+		VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
 		VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
 		VkPipelineColorBlendStateCreateInfo colorBlendStateCI = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
 		VkPipelineDepthStencilStateCreateInfo depthStencilStateCI = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
@@ -692,28 +653,7 @@ public:
 		pipelineCI.pDynamicState = &dynamicStateCI;
 		pipelineCI.stageCount = shaderStages.size();
 		pipelineCI.pStages = shaderStages.data();
-
-		// Shared vertex inputs
-
-		// Binding description
-		VkVertexInputBindingDescription vertexInputBinding = { 0, vertexLayout.stride(), VK_VERTEX_INPUT_RATE_VERTEX };
-
-		// Attribute descriptions
-		// Describes memory layout and shader positions
-		std::vector<VkVertexInputAttributeDescription> vertexInputAttributes = {
-			{ 0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0 },					// Location 0: Position
-			{ 1, 0, VK_FORMAT_R32G32B32_SFLOAT, sizeof(float) * 3 },	// Location 1: Normal
-			{ 2, 0, VK_FORMAT_R32G32_SFLOAT, sizeof(float) * 6 },		// Location 2: Texture coordinates
-			{ 3, 0, VK_FORMAT_R32G32B32_SFLOAT, sizeof(float) * 8 },	// Location 3: Color
-		};
-
-		VkPipelineVertexInputStateCreateInfo vertexInputState = vks::initializers::pipelineVertexInputStateCreateInfo();
-		vertexInputState.vertexBindingDescriptionCount = 1;
-		vertexInputState.pVertexBindingDescriptions = &vertexInputBinding;
-		vertexInputState.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributes.size());
-		vertexInputState.pVertexAttributeDescriptions = vertexInputAttributes.data();
-
-		pipelineCI.pVertexInputState = &vertexInputState;
+		pipelineCI.pVertexInputState            = vkglTF::Vertex::getPipelineVertexInputState({vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV, vkglTF::VertexComponent::Color});
 
 		// Toon shading pipeline
 		shaderStages[0] = loadShader(getShadersPath() + "debugmarker/toon.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
@@ -751,7 +691,7 @@ public:
 		blendAttachmentState.dstAlphaBlendFactor = VK_BLEND_FACTOR_DST_ALPHA;
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.postprocess));
 
-		// Name shader moduels for debugging
+		// Name shader modules for debugging
 		// Shader module count starts at 2 when UI overlay in base class is enabled
 		uint32_t moduleIndex = settings.overlay ? 2 : 0;
 		DebugMarker::setObjectName(device, (uint64_t)shaderModules[moduleIndex + 0], VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT, "Toon shading vertex shader");
@@ -815,7 +755,7 @@ public:
 	{
 		VulkanExampleBase::prepare();
 		DebugMarker::setup(device, physicalDevice);
-		loadScene();
+		loadAssets();
 		prepareOffscreen();
 		prepareUniformBuffers();
 		setupDescriptorSetLayout();
@@ -835,6 +775,10 @@ public:
 			updateUniformBuffers();
 	}
 
+	virtual void viewChanged()
+	{
+		updateUniformBuffers();
+	}
 
 	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay)
 	{

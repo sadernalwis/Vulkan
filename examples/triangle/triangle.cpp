@@ -2,7 +2,7 @@
 * Vulkan Example - Basic indexed triangle rendering
 *
 * Note:
-*	This is a "pedal to the metal" example to show off how to get Vulkan up an displaying something
+*	This is a "pedal to the metal" example to show off how to get Vulkan up and displaying something
 *	Contrary to the other examples, this one won't make use of helper functions or initializers
 *	Except in a few cases (swap chain setup e.g.)
 *
@@ -79,7 +79,7 @@ public:
 		glm::mat4 viewMatrix;
 	} uboVS;
 
-	// The pipeline layout is used by a pipline to access the descriptor sets
+	// The pipeline layout is used by a pipeline to access the descriptor sets
 	// It defines interface (without binding any actual data) between the shader stages used by the pipeline and the shader resources
 	// A pipeline layout can be shared among multiple pipelines as long as their interfaces match
 	VkPipelineLayout pipelineLayout;
@@ -87,7 +87,7 @@ public:
 	// Pipelines (often called "pipeline state objects") are used to bake all states that affect a pipeline
 	// While in OpenGL every state can be changed at (almost) any time, Vulkan requires to layout the graphics (and compute) pipeline states upfront
 	// So for each combination of non-dynamic pipeline states you need a new pipeline (there are a few exceptions to this not discussed here)
-	// Even though this adds a new dimension of planing ahead, it's a great opportunity for performance optimizations by the driver
+	// Even though this adds a new dimension of planning ahead, it's a great opportunity for performance optimizations by the driver
 	VkPipeline pipeline;
 
 	// The descriptor set layout describes the shader binding layout (without actually referencing descriptor)
@@ -109,11 +109,13 @@ public:
 
 	// Fences
 	// Used to check the completion of queue operations (e.g. command buffer execution)
-	std::vector<VkFence> waitFences;
+	std::vector<VkFence> queueCompleteFences;
 
 	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 	{
 		title = "Vulkan Example - Basic indexed triangle";
+		// To keep things simple, we don't use the UI overlay
+		settings.overlay = false;
 		// Setup a default look-at camera
 		camera.type = Camera::CameraType::lookat;
 		camera.setPosition(glm::vec3(0.0f, 0.0f, -2.5f));
@@ -143,14 +145,14 @@ public:
 		vkDestroySemaphore(device, presentCompleteSemaphore, nullptr);
 		vkDestroySemaphore(device, renderCompleteSemaphore, nullptr);
 
-		for (auto& fence : waitFences)
+		for (auto& fence : queueCompleteFences)
 		{
 			vkDestroyFence(device, fence, nullptr);
 		}
 	}
 
-	// This function is used to request a device memory type that supports all the property flags we request (e.g. device local, host visibile)
-	// Upon success it will return the index of the memory type that fits our requestes memory properties
+	// This function is used to request a device memory type that supports all the property flags we request (e.g. device local, host visible)
+	// Upon success it will return the index of the memory type that fits our requested memory properties
 	// This is necessary as implementations can offer an arbitrary number of memory types with different
 	// memory properties.
 	// You can check http://vulkan.gpuinfo.org/ for details on different memory configurations
@@ -180,10 +182,10 @@ public:
 		semaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 		semaphoreCreateInfo.pNext = nullptr;
 
-		// Semaphore used to ensures that image presentation is complete before starting to submit again
+		// Semaphore used to ensure that image presentation is complete before starting to submit again
 		VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &presentCompleteSemaphore));
 
-		// Semaphore used to ensures that all commands submitted have been finished before submitting the image to the queue
+		// Semaphore used to ensure that all commands submitted have been finished before submitting the image to the queue
 		VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &renderCompleteSemaphore));
 
 		// Fences (Used to check draw command buffer completion)
@@ -191,8 +193,8 @@ public:
 		fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 		// Create in signaled state so we don't wait on first render of each command buffer
 		fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-		waitFences.resize(drawCmdBuffers.size());
-		for (auto& fence : waitFences)
+		queueCompleteFences.resize(drawCmdBuffers.size());
+		for (auto& fence : queueCompleteFences)
 		{
 			VK_CHECK_RESULT(vkCreateFence(device, &fenceCreateInfo, nullptr, &fence));
 		}
@@ -332,28 +334,55 @@ public:
 
 	void draw()
 	{
+#if defined(VK_USE_PLATFORM_MACOS_MVK)
+		// SRS - on macOS use swapchain helper function with common semaphores/fences for proper resize handling
 		// Get next image in the swap chain (back/front buffer)
-		VK_CHECK_RESULT(swapChain.acquireNextImage(presentCompleteSemaphore, &currentBuffer));
+		prepareFrame();
 
 		// Use a fence to wait until the command buffer has finished execution before using it again
 		VK_CHECK_RESULT(vkWaitForFences(device, 1, &waitFences[currentBuffer], VK_TRUE, UINT64_MAX));
 		VK_CHECK_RESULT(vkResetFences(device, 1, &waitFences[currentBuffer]));
+#else
+		// SRS - on other platforms use original bare code with local semaphores/fences for illustrative purposes
+		// Get next image in the swap chain (back/front buffer)
+		VkResult acquire = swapChain.acquireNextImage(presentCompleteSemaphore, &currentBuffer);
+		if (!((acquire == VK_SUCCESS) || (acquire == VK_SUBOPTIMAL_KHR))) {
+			VK_CHECK_RESULT(acquire);
+		}
+
+		// Use a fence to wait until the command buffer has finished execution before using it again
+		VK_CHECK_RESULT(vkWaitForFences(device, 1, &queueCompleteFences[currentBuffer], VK_TRUE, UINT64_MAX));
+		VK_CHECK_RESULT(vkResetFences(device, 1, &queueCompleteFences[currentBuffer]));
+#endif
 
 		// Pipeline stage at which the queue submission will wait (via pWaitSemaphores)
 		VkPipelineStageFlags waitStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-		// The submit info structure specifices a command buffer queue submission batch
+		// The submit info structure specifies a command buffer queue submission batch
 		VkSubmitInfo submitInfo = {};
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		submitInfo.pWaitDstStageMask = &waitStageMask;               // Pointer to the list of pipeline stages that the semaphore waits will occur at
-		submitInfo.pWaitSemaphores = &presentCompleteSemaphore;      // Semaphore(s) to wait upon before the submitted command buffer starts executing
 		submitInfo.waitSemaphoreCount = 1;                           // One wait semaphore
-		submitInfo.pSignalSemaphores = &renderCompleteSemaphore;     // Semaphore(s) to be signaled when command buffers have completed
 		submitInfo.signalSemaphoreCount = 1;                         // One signal semaphore
 		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer]; // Command buffers(s) to execute in this batch (submission)
 		submitInfo.commandBufferCount = 1;                           // One command buffer
 
+#if defined(VK_USE_PLATFORM_MACOS_MVK)
+		// SRS - on macOS use swapchain helper function with common semaphores/fences for proper resize handling
+		submitInfo.pWaitSemaphores = &semaphores.presentComplete;    // Semaphore(s) to wait upon before the submitted command buffer starts executing
+		submitInfo.pSignalSemaphores = &semaphores.renderComplete;   // Semaphore(s) to be signaled when command buffers have completed
+
 		// Submit to the graphics queue passing a wait fence
 		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, waitFences[currentBuffer]));
+
+		// Present the current buffer to the swap chain
+		submitFrame();
+#else
+		// SRS - on other platforms use original bare code with local semaphores/fences for illustrative purposes
+		submitInfo.pWaitSemaphores = &presentCompleteSemaphore;      // Semaphore(s) to wait upon before the submitted command buffer starts executing
+		submitInfo.pSignalSemaphores = &renderCompleteSemaphore;     // Semaphore(s) to be signaled when command buffers have completed
+
+		// Submit to the graphics queue passing a wait fence
+		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, queueCompleteFences[currentBuffer]));
 
 		// Present the current buffer to the swap chain
 		// Pass the semaphore signaled by the command buffer submission from the submit info as the wait semaphore for swap chain presentation
@@ -362,7 +391,7 @@ public:
 		if (!((present == VK_SUCCESS) || (present == VK_SUBOPTIMAL_KHR))) {
 			VK_CHECK_RESULT(present);
 		}
-
+#endif
 	}
 
 	// Prepare vertex and index buffers for an indexed triangle
@@ -370,8 +399,8 @@ public:
 	void prepareVertices(bool useStagingBuffers)
 	{
 		// A note on memory management in Vulkan in general:
-		//	This is a very complex topic and while it's fine for an example application to to small individual memory allocations that is not
-		//	what should be done a real-world application, where you should allocate large chunkgs of memory at once isntead.
+		//	This is a very complex topic and while it's fine for an example application to small individual memory allocations that is not
+		//	what should be done a real-world application, where you should allocate large chunks of memory at once instead.
 
 		// Setup vertices
 		std::vector<Vertex> vertexBuffer =
@@ -659,7 +688,11 @@ public:
 		depthStencilView.viewType = VK_IMAGE_VIEW_TYPE_2D;
 		depthStencilView.format = depthFormat;
 		depthStencilView.subresourceRange = {};
-		depthStencilView.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+		depthStencilView.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+		// Stencil aspect should only be set on depth + stencil formats (VK_FORMAT_D16_UNORM_S8_UINT..VK_FORMAT_D32_SFLOAT_S8_UINT)
+		if (depthFormat >= VK_FORMAT_D16_UNORM_S8_UINT)
+			depthStencilView.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+
 		depthStencilView.subresourceRange.baseMipLevel = 0;
 		depthStencilView.subresourceRange.levelCount = 1;
 		depthStencilView.subresourceRange.baseArrayLayer = 0;
@@ -733,7 +766,7 @@ public:
 
 		VkAttachmentReference depthReference = {};
 		depthReference.attachment = 1;                                            // Attachment 1 is color
-		depthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL; // Attachment used as depth/stemcil used during the subpass
+		depthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL; // Attachment used as depth/stencil used during the subpass
 
 		// Setup a single subpass reference
 		VkSubpassDescription subpassDescription = {};
@@ -748,33 +781,30 @@ public:
 		subpassDescription.pResolveAttachments = nullptr;                       // Resolve attachments are resolved at the end of a sub pass and can be used for e.g. multi sampling
 
 		// Setup subpass dependencies
-		// These will add the implicit ttachment layout transitionss specified by the attachment descriptions
+		// These will add the implicit attachment layout transitions specified by the attachment descriptions
 		// The actual usage layout is preserved through the layout specified in the attachment reference
 		// Each subpass dependency will introduce a memory and execution dependency between the source and dest subpass described by
 		// srcStageMask, dstStageMask, srcAccessMask, dstAccessMask (and dependencyFlags is set)
 		// Note: VK_SUBPASS_EXTERNAL is a special constant that refers to all commands executed outside of the actual renderpass)
 		std::array<VkSubpassDependency, 2> dependencies;
 
-		// First dependency at the start of the renderpass
-		// Does the transition from final to initial layout
-		dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;                             // Producer of the dependency
-		dependencies[0].dstSubpass = 0;                                               // Consumer is our single subpass that will wait for the execution depdendency
-		dependencies[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // Match our pWaitDstStageMask when we vkQueueSubmit
-		dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // is a loadOp stage for color attachments
-		dependencies[0].srcAccessMask = 0;                                            // semaphore wait already does memory dependency for us
-		dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;         // is a loadOp CLEAR access mask for color attachments
-		dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-
-		// Second dependency at the end the renderpass
-		// Does the transition from the initial to the final layout
-		// Technically this is the same as the implicit subpass dependency, but we are gonna state it explicitly here
-		dependencies[1].srcSubpass = 0;                                               // Producer of the dependency is our single subpass
-		dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;                             // Consumer are all commands outside of the renderpass
-		dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // is a storeOp stage for color attachments
-		dependencies[1].dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;          // Do not block any subsequent work
-		dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;         // is a storeOp `STORE` access mask for color attachments
-		dependencies[1].dstAccessMask = 0;
-		dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+		// Does the transition from final to initial layout for the depth an color attachments
+		// Depth attachment
+		dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+		dependencies[0].dstSubpass = 0;
+		dependencies[0].srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+		dependencies[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+		dependencies[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		dependencies[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+		dependencies[0].dependencyFlags = 0;
+		// Color attachment
+		dependencies[1].srcSubpass = VK_SUBPASS_EXTERNAL;
+		dependencies[1].dstSubpass = 0;
+		dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependencies[1].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependencies[1].srcAccessMask = 0;
+		dependencies[1].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+		dependencies[1].dependencyFlags = 0;
 
 		// Create the actual renderpass
 		VkRenderPassCreateInfo renderPassInfo = {};
@@ -857,7 +887,7 @@ public:
 		// Renderpass this pipeline is attached to
 		pipelineCreateInfo.renderPass = renderPass;
 
-		// Construct the differnent states making up the pipeline
+		// Construct the different states making up the pipeline
 
 		// Input assembly state describes how primitives are assembled
 		// This pipeline will assemble vertex data as a triangle lists (though we only use one triangle)
@@ -887,7 +917,7 @@ public:
 		colorBlendState.pAttachments = blendAttachmentState;
 
 		// Viewport state sets the number of viewports and scissor used in this pipeline
-		// Note: This is actually overriden by the dynamic states (see below)
+		// Note: This is actually overridden by the dynamic states (see below)
 		VkPipelineViewportStateCreateInfo viewportState = {};
 		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
 		viewportState.viewportCount = 1;
@@ -920,7 +950,7 @@ public:
 		depthStencilState.front = depthStencilState.back;
 
 		// Multi sampling state
-		// This example does not make use fo multi sampling (for anti-aliasing), the state must still be set and passed to the pipeline
+		// This example does not make use of multi sampling (for anti-aliasing), the state must still be set and passed to the pipeline
 		VkPipelineMultisampleStateCreateInfo multisampleState = {};
 		multisampleState.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 		multisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
@@ -936,7 +966,7 @@ public:
 		vertexInputBinding.stride = sizeof(Vertex);
 		vertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-		// Inpute attribute bindings describe shader attribute locations and memory layouts
+		// Input attribute bindings describe shader attribute locations and memory layouts
 		std::array<VkVertexInputAttributeDescription, 2> vertexInputAttributs;
 		// These match the following shader layout (see triangle.vert):
 		//	layout (location = 0) in vec3 inPos;
@@ -997,7 +1027,6 @@ public:
 		pipelineCreateInfo.pMultisampleState = &multisampleState;
 		pipelineCreateInfo.pViewportState = &viewportState;
 		pipelineCreateInfo.pDepthStencilState = &depthStencilState;
-		pipelineCreateInfo.renderPass = renderPass;
 		pipelineCreateInfo.pDynamicState = &dynamicState;
 
 		// Create rendering pipeline using the specified states
@@ -1032,7 +1061,7 @@ public:
 		// Get memory requirements including size, alignment and memory type
 		vkGetBufferMemoryRequirements(device, uniformBufferVS.buffer, &memReqs);
 		allocInfo.allocationSize = memReqs.size;
-		// Get the memory type index that supports host visibile memory access
+		// Get the memory type index that supports host visible memory access
 		// Most implementations offer multiple memory types and selecting the correct one to allocate memory from is crucial
 		// We also want the buffer to be host coherent so we don't have to flush (or sync after every update.
 		// Note: This may affect performance so you might not want to do this in a real world application that updates buffers on a regular base
@@ -1095,7 +1124,7 @@ public:
 };
 
 // OS specific macros for the example main entry points
-// Most of the code base is shared for the different supported operating systems, but stuff like message handling diffes
+// Most of the code base is shared for the different supported operating systems, but stuff like message handling differs
 
 #if defined(_WIN32)
 // Windows entry point
@@ -1151,24 +1180,9 @@ int main(const int argc, const char *argv[])
 	delete(vulkanExample);
 	return 0;
 }
-#elif defined(VK_USE_PLATFORM_WAYLAND_KHR)
+#elif defined(VK_USE_PLATFORM_DIRECTFB_EXT)
 VulkanExample *vulkanExample;
-int main(const int argc, const char *argv[])
-{
-	for (size_t i = 0; i < argc; i++) { VulkanExample::args.push_back(argv[i]); };
-	vulkanExample = new VulkanExample();
-	vulkanExample->initVulkan();
-	vulkanExample->setupWindow();
-	vulkanExample->prepare();
-	vulkanExample->renderLoop();
-	delete(vulkanExample);
-	return 0;
-}
-#elif defined(__linux__)
-
-// Linux entry point
-VulkanExample *vulkanExample;
-static void handleEvent(const xcb_generic_event_t *event)
+static void handleEvent(const DFBWindowEvent *event)
 {
 	if (vulkanExample != NULL)
 	{
@@ -1184,6 +1198,63 @@ int main(const int argc, const char *argv[])
 	vulkanExample->prepare();
 	vulkanExample->renderLoop();
 	delete(vulkanExample);
+	return 0;
+}
+#elif defined(VK_USE_PLATFORM_WAYLAND_KHR)
+VulkanExample *vulkanExample;
+int main(const int argc, const char *argv[])
+{
+	for (size_t i = 0; i < argc; i++) { VulkanExample::args.push_back(argv[i]); };
+	vulkanExample = new VulkanExample();
+	vulkanExample->initVulkan();
+	vulkanExample->setupWindow();
+	vulkanExample->prepare();
+	vulkanExample->renderLoop();
+	delete(vulkanExample);
+	return 0;
+}
+#elif defined(__linux__) || defined(__FreeBSD__)
+
+// Linux entry point
+VulkanExample *vulkanExample;
+#if defined(VK_USE_PLATFORM_XCB_KHR)
+static void handleEvent(const xcb_generic_event_t *event)
+{
+	if (vulkanExample != NULL)
+	{
+		vulkanExample->handleEvent(event);
+	}
+}
+#else
+static void handleEvent()
+{
+}
+#endif
+int main(const int argc, const char *argv[])
+{
+	for (size_t i = 0; i < argc; i++) { VulkanExample::args.push_back(argv[i]); };
+	vulkanExample = new VulkanExample();
+	vulkanExample->initVulkan();
+	vulkanExample->setupWindow();
+	vulkanExample->prepare();
+	vulkanExample->renderLoop();
+	delete(vulkanExample);
+	return 0;
+}
+#elif (defined(VK_USE_PLATFORM_MACOS_MVK) && defined(VK_EXAMPLE_XCODE_GENERATED))
+VulkanExample *vulkanExample;
+int main(const int argc, const char *argv[])
+{
+	@autoreleasepool
+	{
+		for (size_t i = 0; i < argc; i++) { VulkanExample::args.push_back(argv[i]); };
+		vulkanExample = new VulkanExample();
+		vulkanExample->initVulkan();
+		vulkanExample->setupWindow(nullptr);
+		vulkanExample->prepare();
+		vulkanExample->renderLoop();
+		delete(vulkanExample);
+	}
 	return 0;
 }
 #endif

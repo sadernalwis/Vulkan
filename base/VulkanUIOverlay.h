@@ -19,8 +19,8 @@
 #include <vulkan/vulkan.h>
 #include "VulkanTools.h"
 #include "VulkanDebug.h"
-#include "VulkanBuffer.hpp"
-#include "VulkanDevice.hpp"
+#include "VulkanBuffer.h"
+#include "VulkanDevice.h"
 
 #include "../external/imgui/imgui.h"
 
@@ -69,7 +69,7 @@ namespace vks
 		UIOverlay();
 		~UIOverlay();
 
-		void preparePipeline(const VkPipelineCache pipelineCache, const VkRenderPass renderPass);
+		void preparePipeline(const VkPipelineCache pipelineCache, const VkRenderPass renderPass, const VkFormat colorFormat, const VkFormat depthFormat);
 		void prepareResources();
 
 		bool update();
@@ -81,6 +81,7 @@ namespace vks
 		bool header(const char* caption);
 		bool checkBox(const char* caption, bool* value);
 		bool checkBox(const char* caption, int32_t* value);
+		bool radioButton(const char* caption, bool value);
 		bool inputFloat(const char* caption, float* value, float step, uint32_t precision);
 		bool sliderFloat(const char* caption, float* value, float min, float max);
 		bool sliderInt(const char* caption, int32_t* value, int32_t min, int32_t max);
