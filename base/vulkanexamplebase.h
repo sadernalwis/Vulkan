@@ -1,7 +1,7 @@
 /*
 * Vulkan Example base class
 *
-* Copyright (C) by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2016-2024 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -80,7 +80,6 @@ private:
 	uint32_t destWidth;
 	uint32_t destHeight;
 	bool resizing = false;
-	void windowResize();
 	void handleMouseMove(int32_t x, int32_t y);
 	void nextFrame();
 	void updateOverlay();
@@ -101,16 +100,16 @@ protected:
 	uint32_t lastFPS = 0;
 	std::chrono::time_point<std::chrono::high_resolution_clock> lastTimestamp, tPrevEnd;
 	// Vulkan instance, stores all per-application states
-	VkInstance instance;
+	VkInstance instance{ VK_NULL_HANDLE };
 	std::vector<std::string> supportedInstanceExtensions;
 	// Physical device (GPU) that Vulkan will use
-	VkPhysicalDevice physicalDevice;
+	VkPhysicalDevice physicalDevice{ VK_NULL_HANDLE };
 	// Stores physical device properties (for e.g. checking device limits)
-	VkPhysicalDeviceProperties deviceProperties;
+	VkPhysicalDeviceProperties deviceProperties{};
 	// Stores the features available on the selected physical device (for e.g. checking if a feature is available)
-	VkPhysicalDeviceFeatures deviceFeatures;
+	VkPhysicalDeviceFeatures deviceFeatures{};
 	// Stores all available memory (type) properties for the physical device
-	VkPhysicalDeviceMemoryProperties deviceMemoryProperties;
+	VkPhysicalDeviceMemoryProperties deviceMemoryProperties{};
 	/** @brief Set of physical device features to be enabled for this example (must be set in the derived constructor) */
 	VkPhysicalDeviceFeatures enabledFeatures{};
 	/** @brief Set of device extensions to be enabled for this example (must be set in the derived constructor) */
@@ -119,13 +118,13 @@ protected:
 	/** @brief Optional pNext structure for passing extension structures to device creation */
 	void* deviceCreatepNextChain = nullptr;
 	/** @brief Logical device, application's view of the physical device (GPU) */
-	VkDevice device;
+	VkDevice device{ VK_NULL_HANDLE };
 	// Handle to the device graphics queue that command buffers are submitted to
-	VkQueue queue;
+	VkQueue queue{ VK_NULL_HANDLE };
 	// Depth buffer format (selected during Vulkan initialization)
 	VkFormat depthFormat;
 	// Command buffer pool
-	VkCommandPool cmdPool;
+	VkCommandPool cmdPool{ VK_NULL_HANDLE };
 	/** @brief Pipeline stages used to wait at for graphics queue submissions */
 	VkPipelineStageFlags submitPipelineStages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 	// Contains command buffers and semaphores to be presented to the queue
@@ -133,17 +132,17 @@ protected:
 	// Command buffers used for rendering
 	std::vector<VkCommandBuffer> drawCmdBuffers;
 	// Global render pass for frame buffer writes
-	VkRenderPass renderPass = VK_NULL_HANDLE;
+	VkRenderPass renderPass{ VK_NULL_HANDLE };
 	// List of available frame buffers (same as number of swap chain images)
 	std::vector<VkFramebuffer>frameBuffers;
 	// Active frame buffer index
 	uint32_t currentBuffer = 0;
 	// Descriptor set pool
-	VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+	VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
 	// List of shader modules created (stored for cleanup)
 	std::vector<VkShaderModule> shaderModules;
 	// Pipeline cache object
-	VkPipelineCache pipelineCache;
+	VkPipelineCache pipelineCache{ VK_NULL_HANDLE };
 	// Wraps the swap chain to present images (framebuffers) to the windowing system
 	VulkanSwapChain swapChain;
 	// Synchronization semaphores
@@ -154,6 +153,7 @@ protected:
 		VkSemaphore renderComplete;
 	} semaphores;
 	std::vector<VkFence> waitFences;
+	bool requiresStencil{ false };
 public:
 	bool prepared = false;
 	bool resized = false;
@@ -161,7 +161,7 @@ public:
 	uint32_t width = 1280;
 	uint32_t height = 720;
 
-	vks::UIOverlay UIOverlay;
+	vks::UIOverlay ui;
 	CommandLineParser commandLineParser;
 
 	/** @brief Last frame time measured using a high performance timer (if available) */
@@ -184,6 +184,22 @@ public:
 		bool overlay = true;
 	} settings;
 
+	/** @brief State of gamepad input (only used on Android) */
+	struct {
+		glm::vec2 axisLeft = glm::vec2(0.0f);
+		glm::vec2 axisRight = glm::vec2(0.0f);
+	} gamePadState;
+
+	/** @brief State of mouse/touch input */
+	struct {
+		struct {
+			bool left = false;
+			bool right = false;
+			bool middle = false;
+		} buttons;
+		glm::vec2 position;
+	} mouseState;
+
 	VkClearColorValue defaultClearColor = { { 0.025f, 0.025f, 0.025f, 1.0f } };
 
 	static std::vector<const char*> args;
@@ -196,28 +212,17 @@ public:
 	bool paused = false;
 
 	Camera camera;
-	glm::vec2 mousePos;
 
 	std::string title = "Vulkan Example";
 	std::string name = "vulkanExample";
 	uint32_t apiVersion = VK_API_VERSION_1_0;
 
+	/** @brief Default depth stencil attachment used by the default render pass */
 	struct {
 		VkImage image;
-		VkDeviceMemory mem;
+		VkDeviceMemory memory;
 		VkImageView view;
-	} depthStencil;
-
-	struct {
-		glm::vec2 axisLeft = glm::vec2(0.0f);
-		glm::vec2 axisRight = glm::vec2(0.0f);
-	} gamePadState;
-
-	struct {
-		bool left = false;
-		bool right = false;
-		bool middle = false;
-	} mouseButtons;
+	} depthStencil{};
 
 	// OS specific
 #if defined(_WIN32)
@@ -233,8 +238,11 @@ public:
 	bool touchDown = false;
 	double touchTimer = 0.0;
 	int64_t lastTapTime = 0;
-#elif (defined(VK_USE_PLATFORM_IOS_MVK) || defined(VK_USE_PLATFORM_MACOS_MVK))
+#elif (defined(VK_USE_PLATFORM_IOS_MVK) || defined(VK_USE_PLATFORM_MACOS_MVK) || defined(VK_USE_PLATFORM_METAL_EXT))
 	void* view;
+#if defined(VK_USE_PLATFORM_METAL_EXT)
+	CAMetalLayer* metalLayer;
+#endif
 #if defined(VK_EXAMPLE_XCODE_GENERATED)
 	bool quit = false;
 #endif
@@ -269,9 +277,15 @@ public:
 	xcb_intern_atom_reply_t *atom_wm_delete_window;
 #elif defined(VK_USE_PLATFORM_HEADLESS_EXT)
 	bool quit = false;
+#elif defined(VK_USE_PLATFORM_SCREEN_QNX)
+	screen_context_t screen_context = nullptr;
+	screen_window_t screen_window = nullptr;
+	screen_event_t screen_event = nullptr;
+	bool quit = false;
 #endif
 
-	VulkanExampleBase(bool enableValidation = false);
+	/** @brief Default base class constructor */
+	VulkanExampleBase();
 	virtual ~VulkanExampleBase();
 	/** @brief Setup the vulkan instance, enable required extensions and connect to the physical device (GPU) */
 	bool initVulkan();
@@ -284,7 +298,7 @@ public:
 #elif defined(VK_USE_PLATFORM_ANDROID_KHR)
 	static int32_t handleAppInput(struct android_app* app, AInputEvent* event);
 	static void handleAppCommand(android_app* app, int32_t cmd);
-#elif (defined(VK_USE_PLATFORM_IOS_MVK) || defined(VK_USE_PLATFORM_MACOS_MVK))
+#elif (defined(VK_USE_PLATFORM_IOS_MVK) || defined(VK_USE_PLATFORM_MACOS_MVK) || defined(VK_USE_PLATFORM_METAL_EXT))
 	void* setupWindow(void* view);
 	void displayLinkOutputCb();
 	void mouseDragged(float x, float y);
@@ -342,15 +356,16 @@ public:
 	xcb_window_t setupWindow();
 	void initxcbConnection();
 	void handleEvent(const xcb_generic_event_t *event);
+#elif defined(VK_USE_PLATFORM_SCREEN_QNX)
+	void setupWindow();
+	void handleEvent();
 #else
 	void setupWindow();
 #endif
 	/** @brief (Virtual) Creates the application wide Vulkan instance */
-	virtual VkResult createInstance(bool enableValidation);
+	virtual VkResult createInstance();
 	/** @brief (Pure virtual) Render function to be implemented by the sample application */
 	virtual void render() = 0;
-	/** @brief (Virtual) Called when the camera view has changed */
-	virtual void viewChanged();
 	/** @brief (Virtual) Called after a key was pressed, can be used to do custom key handling */
 	virtual void keyPressed(uint32_t);
 	/** @brief (Virtual) Called after the mouse cursor moved and before internal events (like camera rotation) is handled */
@@ -376,6 +391,8 @@ public:
 	/** @brief Loads a SPIR-V shader file for the given shader stage */
 	VkPipelineShaderStageCreateInfo loadShader(std::string fileName, VkShaderStageFlagBits stage);
 
+	void windowResize();
+
 	/** @brief Entry point for the main render loop */
 	void renderLoop();
 
@@ -391,6 +408,10 @@ public:
 
 	/** @brief (Virtual) Called when the UI overlay is updating, can be used to add custom elements to the overlay */
 	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay);
+
+#if defined(_WIN32)
+	virtual void OnHandleMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+#endif
 };
 
 // OS specific macros for the example main entry points
@@ -505,7 +526,7 @@ int main(const int argc, const char *argv[])													    \
 	delete(vulkanExample);																			\
 	return 0;																						\
 }
-#elif (defined(VK_USE_PLATFORM_IOS_MVK) || defined(VK_USE_PLATFORM_MACOS_MVK))
+#elif (defined(VK_USE_PLATFORM_IOS_MVK) || defined(VK_USE_PLATFORM_MACOS_MVK) || defined(VK_USE_PLATFORM_METAL_EXT))
 #if defined(VK_EXAMPLE_XCODE_GENERATED)
 #define VULKAN_EXAMPLE_MAIN()																		\
 VulkanExample *vulkanExample;																		\
@@ -526,4 +547,19 @@ int main(const int argc, const char *argv[])														\
 #else
 #define VULKAN_EXAMPLE_MAIN()
 #endif
+
+#elif defined(VK_USE_PLATFORM_SCREEN_QNX)
+#define VULKAN_EXAMPLE_MAIN()												\
+VulkanExample *vulkanExample;												\
+int main(const int argc, const char *argv[])										\
+{															\
+	for (int i = 0; i < argc; i++) { VulkanExample::args.push_back(argv[i]); };					\
+	vulkanExample = new VulkanExample();										\
+	vulkanExample->initVulkan();											\
+	vulkanExample->setupWindow();											\
+	vulkanExample->prepare();											\
+	vulkanExample->renderLoop();											\
+	delete(vulkanExample);												\
+	return 0;													\
+}
 #endif

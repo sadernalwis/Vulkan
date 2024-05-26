@@ -1,11 +1,17 @@
-
 /*
 * Vulkan glTF model and texture loading class based on tinyglTF (https://github.com/syoyo/tinygltf)
 *
-* Copyright (C) 2018 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2018-2023 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
+
+/*
+ * Note that this isn't a complete glTF loader and not all features of the glTF 2.0 spec are supported
+ * For details on how glTF 2.0 works, see the official spec at https://github.com/KhronosGroup/glTF/tree/master/specification/2.0
+ *
+ * If you are looking for a complete glTF implementation, check out https://github.com/SaschaWillems/Vulkan-glTF-PBR/
+ */
 
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
@@ -166,17 +172,16 @@ void vkglTF::Texture::fromglTfImage(tinygltf::Image &gltfimage, std::string path
 		subresourceRange.levelCount = 1;
 		subresourceRange.layerCount = 1;
 
-		{
-			VkImageMemoryBarrier imageMemoryBarrier{};
-			imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-			imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-			imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-			imageMemoryBarrier.srcAccessMask = 0;
-			imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			imageMemoryBarrier.image = image;
-			imageMemoryBarrier.subresourceRange = subresourceRange;
-			vkCmdPipelineBarrier(copyCmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
-		}
+		VkImageMemoryBarrier imageMemoryBarrier{};
+
+		imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		imageMemoryBarrier.srcAccessMask = 0;
+		imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		imageMemoryBarrier.image = image;
+		imageMemoryBarrier.subresourceRange = subresourceRange;
+		vkCmdPipelineBarrier(copyCmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
 
 		VkBufferImageCopy bufferCopyRegion = {};
 		bufferCopyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -189,22 +194,19 @@ void vkglTF::Texture::fromglTfImage(tinygltf::Image &gltfimage, std::string path
 
 		vkCmdCopyBufferToImage(copyCmd, stagingBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bufferCopyRegion);
 
-		{
-			VkImageMemoryBarrier imageMemoryBarrier{};
-			imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-			imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-			imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-			imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-			imageMemoryBarrier.image = image;
-			imageMemoryBarrier.subresourceRange = subresourceRange;
-			vkCmdPipelineBarrier(copyCmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
-		}
+		imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+		imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+		imageMemoryBarrier.image = image;
+		imageMemoryBarrier.subresourceRange = subresourceRange;
+  		vkCmdPipelineBarrier(copyCmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
 
 		device->flushCommandBuffer(copyCmd, copyQueue, true);
 
-		vkFreeMemory(device->logicalDevice, stagingMemory, nullptr);
 		vkDestroyBuffer(device->logicalDevice, stagingBuffer, nullptr);
+		vkFreeMemory(device->logicalDevice, stagingMemory, nullptr);
 
 		// Generate the mip chain (glTF uses jpg and png, so we need to create this manually)
 		VkCommandBuffer blitCmd = device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
@@ -261,17 +263,14 @@ void vkglTF::Texture::fromglTfImage(tinygltf::Image &gltfimage, std::string path
 		subresourceRange.levelCount = mipLevels;
 		imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-		{
-			VkImageMemoryBarrier imageMemoryBarrier{};
-			imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-			imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-			imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			imageMemoryBarrier.image = image;
-			imageMemoryBarrier.subresourceRange = subresourceRange;
-			vkCmdPipelineBarrier(blitCmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
-		}
+		imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+		imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+		imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		imageMemoryBarrier.image = image;
+		imageMemoryBarrier.subresourceRange = subresourceRange;
+		vkCmdPipelineBarrier(blitCmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
 
         if (deleteBuffer) {
             delete[] buffer;
@@ -289,7 +288,7 @@ void vkglTF::Texture::fromglTfImage(tinygltf::Image &gltfimage, std::string path
 #if defined(__ANDROID__)
 		AAsset* asset = AAssetManager_open(androidApp->activity->assetManager, filename.c_str(), AASSET_MODE_STREAMING);
 		if (!asset) {
-			vks::tools::exitFatal("Could not load texture from " + filename + "\n\nThe file may be part of the additional asset pack.\n\nRun \"download_assets.py\" in the repository root to download the latest version.", -1);
+			vks::tools::exitFatal("Could not load texture from " + filename + "\n\nMake sure the assets submodule has been checked out and is up-to-date.", -1);
 		}
 		size_t size = AAsset_getLength(asset);
 		assert(size > 0);
@@ -300,7 +299,7 @@ void vkglTF::Texture::fromglTfImage(tinygltf::Image &gltfimage, std::string path
 		delete[] textureData;
 #else
 		if (!vks::tools::fileExists(filename)) {
-			vks::tools::exitFatal("Could not load texture from " + filename + "\n\nThe file may be part of the additional asset pack.\n\nRun \"download_assets.py\" in the repository root to download the latest version.", -1);
+			vks::tools::exitFatal("Could not load texture from " + filename + "\n\nMake sure the assets submodule has been checked out and is up-to-date.", -1);
 		}
 		result = ktxTexture_CreateFromNamedFile(filename.c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxTexture);
 #endif		
@@ -394,8 +393,8 @@ void vkglTF::Texture::fromglTfImage(tinygltf::Image &gltfimage, std::string path
 		device->flushCommandBuffer(copyCmd, copyQueue);
 		this->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-		vkFreeMemory(device->logicalDevice, stagingMemory, nullptr);
 		vkDestroyBuffer(device->logicalDevice, stagingBuffer, nullptr);
+		vkFreeMemory(device->logicalDevice, stagingMemory, nullptr);
 
 		ktxTexture_Destroy(ktxTexture);
 	}
@@ -699,8 +698,8 @@ void vkglTF::Model::createEmptyTexture(VkQueue transferQueue)
 	emptyTexture.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
 	// Clean up staging resources
-	vkFreeMemory(device->logicalDevice, stagingMemory, nullptr);
 	vkDestroyBuffer(device->logicalDevice, stagingBuffer, nullptr);
+	vkFreeMemory(device->logicalDevice, stagingMemory, nullptr);
 
 	VkSamplerCreateInfo samplerCreateInfo = vks::initializers::samplerCreateInfo();
 	samplerCreateInfo.magFilter = VK_FILTER_LINEAR;
@@ -994,6 +993,7 @@ void vkglTF::Model::loadImages(tinygltf::Model &gltfModel, vks::VulkanDevice *de
 	for (tinygltf::Image &image : gltfModel.images) {
 		vkglTF::Texture texture;
 		texture.fromglTfImage(image, path, device, transferQueue);
+		texture.index = static_cast<uint32_t>(textures.size());
 		textures.push_back(texture);
 	}
 	// Create an empty texture to be used for empty material images
@@ -1222,7 +1222,6 @@ void vkglTF::Model::loadFromFile(std::string filename, vks::VulkanDevice *device
 		}
 	}
 	else {
-		// TODO: throw
 		vks::tools::exitFatal("Could not load glTF file \"" + filename + "\": " + error, -1);
 		return;
 	}

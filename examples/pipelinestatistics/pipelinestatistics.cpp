@@ -1,7 +1,7 @@
 /*
 * Vulkan Example - Retrieving pipeline statistics
 *
-* Copyright (C) 2017 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2017-2024 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -9,49 +9,43 @@
 #include "vulkanexamplebase.h"
 #include "VulkanglTFModel.h"
 
-#define ENABLE_VALIDATION false
-#define OBJ_DIM 0.05f
-
 class VulkanExample : public VulkanExampleBase
 {
 public:
+	// This sample lets you select between different models to display
 	struct Models {
 		std::vector<vkglTF::Model> objects;
-		int32_t objectIndex = 3;
+		int32_t objectIndex{ 3 };
 		std::vector<std::string> names;
 	} models;
+	// Size for the two-dimensional grid of objects (e.g. 3 = draws 3x3 objects)
+	int32_t gridSize{ 3 };
 
-	struct UniformBuffers {
-		vks::Buffer VS;
-	} uniformBuffers;
-
-	struct UBOVS {
+	struct UniformData {
 		glm::mat4 projection;
 		glm::mat4 modelview;
-		glm::vec4 lightPos = glm::vec4(-10.0f, -10.0f, 10.0f, 1.0f);
-	} uboVS;
+		glm::vec4 lightPos{ -10.0f, -10.0f, 10.0f, 1.0f };
+	} uniformData;
+	vks::Buffer uniformBuffer;
 
-	VkPipeline pipeline = VK_NULL_HANDLE;
+	int32_t cullMode{ VK_CULL_MODE_BACK_BIT };
+	bool blending{ false };
+	bool discard{ false };
+	bool wireframe{ false };
+	bool tessellation{ false };
 
-	int32_t cullMode = VK_CULL_MODE_BACK_BIT;
-	bool blending = false;
-	bool discard = false;
-	bool wireframe = false;
-	bool tessellation = false;
+	VkPipeline pipeline{ VK_NULL_HANDLE };
+	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
+	VkDescriptorSet descriptorSet{ VK_NULL_HANDLE };
+	VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
 
-	VkPipelineLayout pipelineLayout;
-	VkDescriptorSet descriptorSet;
-	VkDescriptorSetLayout descriptorSetLayout;
-
-	VkQueryPool queryPool;
+	VkQueryPool queryPool{ VK_NULL_HANDLE };
 
 	// Vector for storing pipeline statistics results
-	std::vector<uint64_t> pipelineStats;
-	std::vector<std::string> pipelineStatNames;
+	std::vector<uint64_t> pipelineStats{};
+	std::vector<std::string> pipelineStatNames{};
 
-	int32_t gridSize = 3;
-
-	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
+	VulkanExample() : VulkanExampleBase()
 	{
 		title = "Pipeline statistics";
 		camera.type = Camera::CameraType::firstperson;
@@ -64,11 +58,13 @@ public:
 
 	~VulkanExample()
 	{
-		vkDestroyPipeline(device, pipeline, nullptr);
-		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-		vkDestroyQueryPool(device, queryPool, nullptr);
-		uniformBuffers.VS.destroy();
+		if (device) {
+			vkDestroyPipeline(device, pipeline, nullptr);
+			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+			vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+			vkDestroyQueryPool(device, queryPool, nullptr);
+			uniformBuffer.destroy();
+		}
 	}
 
 	virtual void getEnabledFeatures()
@@ -122,23 +118,27 @@ public:
 				VK_QUERY_PIPELINE_STATISTIC_TESSELLATION_CONTROL_SHADER_PATCHES_BIT |
 				VK_QUERY_PIPELINE_STATISTIC_TESSELLATION_EVALUATION_SHADER_INVOCATIONS_BIT;
 		}
-		queryPoolInfo.queryCount = deviceFeatures.tessellationShader ? 8 : 6;
+		queryPoolInfo.queryCount = 1;
 		VK_CHECK_RESULT(vkCreateQueryPool(device, &queryPoolInfo, NULL, &queryPool));
 	}
 
 	// Retrieves the results of the pipeline statistics query submitted to the command buffer
 	void getQueryResults()
 	{
-		uint32_t count = static_cast<uint32_t>(pipelineStats.size());
+		// The size of the data we want to fetch ist based on the count of statistics values
+		uint32_t dataSize = static_cast<uint32_t>(pipelineStats.size()) * sizeof(uint64_t);
+		// The stride between queries is the no. of unique value entries
+		uint32_t stride = static_cast<uint32_t>(pipelineStatNames.size()) * sizeof(uint64_t);
+		// Note: for one query both values have the same size, but to make it easier to expand this sample these are properly calculated
 		vkGetQueryPoolResults(
 			device,
 			queryPool,
 			0,
 			1,
-			count * sizeof(uint64_t),
+			dataSize,
 			pipelineStats.data(),
-			sizeof(uint64_t),
-			VK_QUERY_RESULT_64_BIT);
+			stride,
+			VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 	}
 
 	void buildCommandBuffers()
@@ -164,7 +164,7 @@ public:
 			VK_CHECK_RESULT(vkBeginCommandBuffer(drawCmdBuffers[i], &cmdBufInfo));
 
 			// Reset timestamp query pool
-			vkCmdResetQueryPool(drawCmdBuffers[i], queryPool, 0, static_cast<uint32_t>(pipelineStats.size()));
+			vkCmdResetQueryPool(drawCmdBuffers[i], queryPool, 0, 1);
 
 			vkCmdBeginRenderPass(drawCmdBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -203,20 +203,6 @@ public:
 		}
 	}
 
-	void draw()
-	{
-		VulkanExampleBase::prepareFrame();
-
-		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
-		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
-
-		// Read query results for displaying in next frame
-		getQueryResults();
-
-		VulkanExampleBase::submitFrame();
-	}
-
 	void loadAssets()
 	{
 		// Objects
@@ -228,47 +214,45 @@ public:
 		}
 	}
 
-	void setupDescriptorPool()
+	void setupDescriptors()
 	{
+		// Pool
 		std::vector<VkDescriptorPoolSize> poolSizes = {
 			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3)
 		};
-		VkDescriptorPoolCreateInfo descriptorPoolInfo =
-			vks::initializers::descriptorPoolCreateInfo(poolSizes, 3);
+		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 3);
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
-	}
 
-	void setupDescriptorSetLayout()
-	{
+		// Layout
 		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0)
 		};
-		VkDescriptorSetLayoutCreateInfo descriptorLayout =
-			vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
+		VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
 
-		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo =
-			vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
-		VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::vec3), 0);
-		pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-		pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
-	}
-
-	void setupDescriptorSets()
-	{
-		VkDescriptorSetAllocateInfo allocInfo =
-			vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
+		// Set
+		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
 		std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
-			vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.VS.descriptor)
+			vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffer.descriptor)
 		};
 		vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
 	}
 
 	void preparePipelines()
 	{
+		// Layout
+		if (pipelineLayout == VK_NULL_HANDLE) {
+			VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
+			VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::vec3), 0);
+			pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+			pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
+			VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+		}
+
+		// Pipeline
 		if (pipeline != VK_NULL_HANDLE) {
+			// Destroy old pipeline if we're going to recreate it
 			vkDestroyPipeline(device, pipeline, nullptr);
 		}
 
@@ -313,16 +297,18 @@ public:
 			rasterizationState.polygonMode = VK_POLYGON_MODE_LINE;
 		}
 
-		std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
-		shaderStages.resize(tessellation ? 4 : 2);
-		shaderStages[0] = loadShader(getShadersPath() + "pipelinestatistics/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-		shaderStages[1] = loadShader(getShadersPath() + "pipelinestatistics/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+		std::vector<VkPipelineShaderStageCreateInfo> shaderStages{};
+		shaderStages.push_back(loadShader(getShadersPath() + "pipelinestatistics/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT));
+		if (!discard) {
+			// When discard is enabled a pipeline must not contain a fragment shader
+			shaderStages.push_back(loadShader(getShadersPath() + "pipelinestatistics/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT));
+		}
 
 		if (tessellation) {
 			inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
 			pipelineCI.pTessellationState = &tessellationState;
-			shaderStages[2] = loadShader(getShadersPath() + "pipelinestatistics/scene.tesc.spv", VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT);
-			shaderStages[3] = loadShader(getShadersPath() + "pipelinestatistics/scene.tese.spv", VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
+			shaderStages.push_back(loadShader(getShadersPath() + "pipelinestatistics/scene.tesc.spv", VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT));
+			shaderStages.push_back(loadShader(getShadersPath() + "pipelinestatistics/scene.tese.spv", VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT));
 		}
 
 		pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
@@ -333,23 +319,15 @@ public:
 	// Prepare and initialize uniform buffer containing shader uniforms
 	void prepareUniformBuffers()
 	{
-		VK_CHECK_RESULT(vulkanDevice->createBuffer(
-			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			&uniformBuffers.VS,
-			sizeof(uboVS)));
-
-		// Map persistent
-		VK_CHECK_RESULT(uniformBuffers.VS.map());
-
-		updateUniformBuffers();
+		VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &uniformBuffer, sizeof(UniformData)));
+		VK_CHECK_RESULT(uniformBuffer.map());
 	}
 
 	void updateUniformBuffers()
 	{
-		uboVS.projection = camera.matrices.perspective;
-		uboVS.modelview = camera.matrices.view;
-		memcpy(uniformBuffers.VS.mapped, &uboVS, sizeof(uboVS));
+		uniformData.projection = camera.matrices.perspective;
+		uniformData.modelview = camera.matrices.view;
+		memcpy(uniformBuffer.mapped, &uniformData, sizeof(UniformData));
 	}
 
 	void prepare()
@@ -358,24 +336,32 @@ public:
 		loadAssets();
 		setupQueryPool();
 		prepareUniformBuffers();
-		setupDescriptorSetLayout();
+		setupDescriptors();
 		preparePipelines();
-		setupDescriptorPool();
-		setupDescriptorSets();
 		buildCommandBuffers();
 		prepared = true;
+	}
+
+	void draw()
+	{
+		VulkanExampleBase::prepareFrame();
+
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
+		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+
+		VulkanExampleBase::submitFrame();
+
+		// Read query results for displaying in next frame
+		getQueryResults();
 	}
 
 	virtual void render()
 	{
 		if (!prepared)
 			return;
-		draw();
-	}
-
-	virtual void viewChanged()
-	{
 		updateUniformBuffers();
+		draw();
 	}
 
 	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay)
@@ -388,28 +374,20 @@ public:
 			if (overlay->sliderInt("Grid size", &gridSize, 1, 10)) {
 				buildCommandBuffers();
 			}
+			// To avoid having to create pipelines for all the settings up front, we recreate a single pipelin with different settings instead
+			bool recreatePipeline{ false };
 			std::vector<std::string> cullModeNames = { "None", "Front", "Back", "Back and front" };
-			if (overlay->comboBox("Cull mode", &cullMode, cullModeNames)) {
-				preparePipelines();
-				buildCommandBuffers();
-			}
-			if (overlay->checkBox("Blending", &blending)) {
-				preparePipelines();
-				buildCommandBuffers();
-			}
+			recreatePipeline |= overlay->comboBox("Cull mode", &cullMode, cullModeNames);
+			recreatePipeline |= overlay->checkBox("Blending", &blending);
+			recreatePipeline |= overlay->checkBox("Discard", &discard);
+			// These features may not be supported by all implementations
 			if (deviceFeatures.fillModeNonSolid) {
-				if (overlay->checkBox("Wireframe", &wireframe)) {
-					preparePipelines();
-					buildCommandBuffers();
-				}
+				recreatePipeline |= overlay->checkBox("Wireframe", &wireframe);
 			}
 			if (deviceFeatures.tessellationShader) {
-				if (overlay->checkBox("Tessellation", &tessellation)) {
-					preparePipelines();
-					buildCommandBuffers();
-				}
+				recreatePipeline |= overlay->checkBox("Tessellation", &tessellation);
 			}
-			if (overlay->checkBox("Discard", &discard)) {
+			if (recreatePipeline) {
 				preparePipelines();
 				buildCommandBuffers();
 			}

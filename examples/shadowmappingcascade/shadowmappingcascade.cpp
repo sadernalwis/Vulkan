@@ -20,8 +20,6 @@
 #include "vulkanexamplebase.h"
 #include "VulkanglTFModel.h"
 
-#define ENABLE_VALIDATION false
-
 #if defined(__ANDROID__)
 #define SHADOWMAP_DIM 2048
 #else
@@ -132,7 +130,7 @@ public:
 	};
 	std::array<Cascade, SHADOW_MAP_CASCADE_COUNT> cascades;
 
-	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
+	VulkanExample() : VulkanExampleBase()
 	{
 		title = "Cascaded shadow mapping";
 		timerSpeed *= 0.025f;
@@ -303,7 +301,7 @@ public:
 		viewInfo.image = depth.image;
 		VK_CHECK_RESULT(vkCreateImageView(device, &viewInfo, nullptr, &depth.view));
 
-		// One image and framebuffer per cascade
+		// One image view and framebuffer per cascade
 		for (uint32_t i = 0; i < SHADOW_MAP_CASCADE_COUNT; i++) {
 			// Image view for this cascade's layer (inside the depth map)
 			// This view is used to render to that specific depth image layer
@@ -663,10 +661,10 @@ public:
 			float splitDist = cascadeSplits[i];
 
 			glm::vec3 frustumCorners[8] = {
-				glm::vec3(-1.0f,  1.0f, -1.0f),
-				glm::vec3( 1.0f,  1.0f, -1.0f),
-				glm::vec3( 1.0f, -1.0f, -1.0f),
-				glm::vec3(-1.0f, -1.0f, -1.0f),
+				glm::vec3(-1.0f,  1.0f, 0.0f),
+				glm::vec3( 1.0f,  1.0f, 0.0f),
+				glm::vec3( 1.0f, -1.0f, 0.0f),
+				glm::vec3(-1.0f, -1.0f, 0.0f),
 				glm::vec3(-1.0f,  1.0f,  1.0f),
 				glm::vec3( 1.0f,  1.0f,  1.0f),
 				glm::vec3( 1.0f, -1.0f,  1.0f),
@@ -675,27 +673,27 @@ public:
 
 			// Project frustum corners into world space
 			glm::mat4 invCam = glm::inverse(camera.matrices.perspective * camera.matrices.view);
-			for (uint32_t i = 0; i < 8; i++) {
-				glm::vec4 invCorner = invCam * glm::vec4(frustumCorners[i], 1.0f);
-				frustumCorners[i] = invCorner / invCorner.w;
+			for (uint32_t j = 0; j < 8; j++) {
+				glm::vec4 invCorner = invCam * glm::vec4(frustumCorners[j], 1.0f);
+				frustumCorners[j] = invCorner / invCorner.w;
 			}
 
-			for (uint32_t i = 0; i < 4; i++) {
-				glm::vec3 dist = frustumCorners[i + 4] - frustumCorners[i];
-				frustumCorners[i + 4] = frustumCorners[i] + (dist * splitDist);
-				frustumCorners[i] = frustumCorners[i] + (dist * lastSplitDist);
+			for (uint32_t j = 0; j < 4; j++) {
+				glm::vec3 dist = frustumCorners[j + 4] - frustumCorners[j];
+				frustumCorners[j + 4] = frustumCorners[j] + (dist * splitDist);
+				frustumCorners[j] = frustumCorners[j] + (dist * lastSplitDist);
 			}
 
 			// Get frustum center
 			glm::vec3 frustumCenter = glm::vec3(0.0f);
-			for (uint32_t i = 0; i < 8; i++) {
-				frustumCenter += frustumCorners[i];
+			for (uint32_t j = 0; j < 8; j++) {
+				frustumCenter += frustumCorners[j];
 			}
 			frustumCenter /= 8.0f;
 
 			float radius = 0.0f;
-			for (uint32_t i = 0; i < 8; i++) {
-				float distance = glm::length(frustumCorners[i] - frustumCenter);
+			for (uint32_t j = 0; j < 8; j++) {
+				float distance = glm::length(frustumCorners[j] - frustumCenter);
 				radius = glm::max(radius, distance);
 			}
 			radius = std::ceil(radius * 16.0f) / 16.0f;

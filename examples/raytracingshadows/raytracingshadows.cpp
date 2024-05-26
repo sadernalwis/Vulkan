@@ -83,7 +83,6 @@ public:
 		indexBufferDeviceAddress.deviceAddress = getBufferDeviceAddress(scene.indices.buffer);
 
 		uint32_t numTriangles = static_cast<uint32_t>(scene.indices.count) / 3;
-		uint32_t maxVertex = scene.vertices.count;
 
 		// Build
 		VkAccelerationStructureGeometryKHR accelerationStructureGeometry = vks::initializers::accelerationStructureGeometryKHR();
@@ -92,7 +91,7 @@ public:
 		accelerationStructureGeometry.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
 		accelerationStructureGeometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
 		accelerationStructureGeometry.geometry.triangles.vertexData = vertexBufferDeviceAddress;
-		accelerationStructureGeometry.geometry.triangles.maxVertex = maxVertex;
+		accelerationStructureGeometry.geometry.triangles.maxVertex = scene.vertices.count - 1;
 		accelerationStructureGeometry.geometry.triangles.vertexStride = sizeof(vkglTF::Vertex);
 		accelerationStructureGeometry.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
 		accelerationStructureGeometry.geometry.triangles.indexData = indexBufferDeviceAddress;
@@ -202,7 +201,6 @@ public:
 			&primitive_count,
 			&accelerationStructureBuildSizesInfo);
 
-		// @todo: as return value?
 		createAccelerationStructure(topLevelAS, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, accelerationStructureBuildSizesInfo);
 
 		// Create a small scratch buffer used during build of the top level acceleration structure
@@ -400,7 +398,7 @@ public:
 		rayTracingPipelineCI.pStages = shaderStages.data();
 		rayTracingPipelineCI.groupCount = static_cast<uint32_t>(shaderGroups.size());
 		rayTracingPipelineCI.pGroups = shaderGroups.data();
-		rayTracingPipelineCI.maxPipelineRayRecursionDepth = 2;
+		rayTracingPipelineCI.maxPipelineRayRecursionDepth = std::min(uint32_t(2), rayTracingPipelineProperties.maxRayRecursionDepth);
 		rayTracingPipelineCI.layout = pipelineLayout;
 		VK_CHECK_RESULT(vkCreateRayTracingPipelinesKHR(device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &rayTracingPipelineCI, nullptr, &pipeline));
 	}

@@ -1,16 +1,13 @@
 /*
 * Vulkan Example - Using occlusion query for visibility testing
 *
-* Copyright (C) 2016 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2016-2023 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
 
 #include "vulkanexamplebase.h"
 #include "VulkanglTFModel.h"
-
-#define VERTEX_BUFFER_BIND_ID 0
-#define ENABLE_VALIDATION false
 
 class VulkanExample : public VulkanExampleBase
 {
@@ -59,7 +56,7 @@ public:
 	// Passed query samples
 	uint64_t passedSamples[2] = { 1,1 };
 
-	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
+	VulkanExample() : VulkanExampleBase()
 	{
 		title = "Occlusion queries";
 		camera.type = Camera::CameraType::lookat;
@@ -226,21 +223,6 @@ public:
 		}
 	}
 
-	void draw()
-	{
-		updateUniformBuffers();
-		VulkanExampleBase::prepareFrame();
-
-		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
-		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
-
-		// Read query results for displaying in next frame
-		getQueryResults();
-
-		VulkanExampleBase::submitFrame();
-	}
-
 	void loadAssets()
 	{
 		const uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::PreMultiplyVertexColors | vkglTF::FileLoadingFlags::FlipY;
@@ -249,87 +231,52 @@ public:
 		models.sphere.loadFromFile(getAssetPath() + "models/sphere.gltf", vulkanDevice, queue, glTFLoadingFlags);
 	}
 
-	void setupDescriptorPool()
+	void setupDescriptors()
 	{
-		std::vector<VkDescriptorPoolSize> poolSizes =
-		{
+		// Pool
+		std::vector<VkDescriptorPoolSize> poolSizes = {
 			// One uniform buffer block for each mesh
 			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3)
 		};
-
-		VkDescriptorPoolCreateInfo descriptorPoolInfo =
-			vks::initializers::descriptorPoolCreateInfo(
-				poolSizes.size(),
-				poolSizes.data(),
-				3);
-
+		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 3);
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
-	}
 
-	void setupDescriptorSetLayout()
-	{
-		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings =
-		{
+		// Layout
+		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
 			// Binding 0 : Vertex shader uniform buffer
-			vks::initializers::descriptorSetLayoutBinding(
-				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-				VK_SHADER_STAGE_VERTEX_BIT,
-				0)
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0)
 		};
-
-		VkDescriptorSetLayoutCreateInfo descriptorLayout =
-			vks::initializers::descriptorSetLayoutCreateInfo(
-				setLayoutBindings.data(),
-				setLayoutBindings.size());
-
+		VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
 
-		VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
-			vks::initializers::pipelineLayoutCreateInfo(
-				&descriptorSetLayout,
-				1);
-
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayout));
-	}
-
-	void setupDescriptorSets()
-	{
-		VkDescriptorSetAllocateInfo allocInfo =
-			vks::initializers::descriptorSetAllocateInfo(
-				descriptorPool,
-				&descriptorSetLayout,
-				1);
-
+		// Sets
+		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
 		// Occluder (plane)
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
-
-		std::vector<VkWriteDescriptorSet> writeDescriptorSets =
-		{
+		std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
 			// Binding 0 : Vertex shader uniform buffer
-			vks::initializers::writeDescriptorSet(
-				descriptorSet,
-				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-				0,
-				&uniformBuffers.occluder.descriptor)
+			vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.occluder.descriptor)
 		};
-
-		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
-
+		vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 		// Teapot
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets.teapot));
 		writeDescriptorSets[0].dstSet = descriptorSets.teapot;
 		writeDescriptorSets[0].pBufferInfo = &uniformBuffers.teapot.descriptor;
-		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
-
+		vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 		// Sphere
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets.sphere));
 		writeDescriptorSets[0].dstSet = descriptorSets.sphere;
 		writeDescriptorSets[0].pBufferInfo = &uniformBuffers.sphere.descriptor;
-		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
+		vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 	}
 
 	void preparePipelines()
 	{
+		// Layout
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+
+		// Pipelines
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
 		VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
 		VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
@@ -349,7 +296,7 @@ public:
 		pipelineCI.pViewportState = &viewportState;
 		pipelineCI.pDepthStencilState = &depthStencilState;
 		pipelineCI.pDynamicState = &dynamicState;
-		pipelineCI.stageCount = shaderStages.size();
+		pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
 		pipelineCI.pStages = shaderStages.data();
 		pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::Color });;
 
@@ -412,7 +359,6 @@ public:
 		uboVS.projection = camera.matrices.perspective;
 		uboVS.view = camera.matrices.view;
 
-		uint8_t *pData;
 		// Occluder
 		uboVS.visible = 1.0f;
 		uboVS.model = glm::scale(glm::mat4(1.0f), glm::vec3(6.0f));
@@ -440,12 +386,22 @@ public:
 		loadAssets();
 		setupQueryPool();
 		prepareUniformBuffers();
-		setupDescriptorSetLayout();
+		setupDescriptors();
 		preparePipelines();
-		setupDescriptorPool();
-		setupDescriptorSets();
 		buildCommandBuffers();
 		prepared = true;
+	}
+
+	void draw()
+	{
+		updateUniformBuffers();
+		VulkanExampleBase::prepareFrame();
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
+		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+		// Read query results for displaying in next frame
+		getQueryResults();
+		VulkanExampleBase::submitFrame();
 	}
 
 	virtual void render()

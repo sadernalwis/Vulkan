@@ -3,7 +3,7 @@
 *
 * Relevant code parts are marked with [POI]
 *
-* Copyright (C) 2018 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2018-2023 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -11,7 +11,6 @@
 #include "vulkanexamplebase.h"
 #include "VulkanglTFModel.h"
 
-#define ENABLE_VALIDATION false
 
 class VulkanExample : public VulkanExampleBase
 {
@@ -38,7 +37,7 @@ public:
 
 	VkDescriptorSetLayout descriptorSetLayout;
 
-	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
+	VulkanExample() : VulkanExampleBase()
 	{
 		title = "Using descriptor Sets";
 		camera.type = Camera::CameraType::lookat;
@@ -191,11 +190,11 @@ public:
 
 		std::array<VkDescriptorPoolSize, 2> descriptorPoolSizes{};
 
-		// Uniform buffers : 1 for scene and 1 per object (scene and local matrices)
+		// Uniform buffers : 1 per object
 		descriptorPoolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		descriptorPoolSizes[0].descriptorCount = 1 +  static_cast<uint32_t>(cubes.size());
+		descriptorPoolSizes[0].descriptorCount = static_cast<uint32_t>(cubes.size());
 
-		// Combined image samples : 1 per mesh texture
+		// Combined image samples : 1 per object texture
 		descriptorPoolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		descriptorPoolSizes[1].descriptorCount = static_cast<uint32_t>(cubes.size());
 

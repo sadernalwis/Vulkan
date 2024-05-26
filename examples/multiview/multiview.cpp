@@ -3,7 +3,7 @@
 *
 * Uses VK_KHR_multiview for simultaneously rendering to multiple views and displays these with barrel distortion using a fragment shader
 *
-* Copyright (C) 2018 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2018-2023 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -11,43 +11,40 @@
 #include "vulkanexamplebase.h"
 #include "VulkanglTFModel.h"
 
-#define ENABLE_VALIDATION false
-
 class VulkanExample : public VulkanExampleBase
 {
 public:
 	struct MultiviewPass {
 		struct FrameBufferAttachment {
-			VkImage image;
-			VkDeviceMemory memory;
-			VkImageView view;
+			VkImage image{ VK_NULL_HANDLE };
+			VkDeviceMemory memory{ VK_NULL_HANDLE };
+			VkImageView view{ VK_NULL_HANDLE };
 		} color, depth;
-		VkFramebuffer frameBuffer;
-		VkRenderPass renderPass;
-		VkDescriptorImageInfo descriptor;
-		VkSampler sampler;
-		VkSemaphore semaphore;
-		std::vector<VkCommandBuffer> commandBuffers;
-		std::vector<VkFence> waitFences;
+		VkFramebuffer frameBuffer{ VK_NULL_HANDLE };
+		VkRenderPass renderPass{ VK_NULL_HANDLE };
+		VkDescriptorImageInfo descriptor{ VK_NULL_HANDLE };
+		VkSampler sampler{ VK_NULL_HANDLE };
+		VkSemaphore semaphore{ VK_NULL_HANDLE };
+		std::vector<VkCommandBuffer> commandBuffers{};
+		std::vector<VkFence> waitFences{};
 	} multiviewPass;
 
 	vkglTF::Model scene;
 
-	struct UBO {
+	struct UniformData {
 		glm::mat4 projection[2];
 		glm::mat4 modelview[2];
 		glm::vec4 lightPos = glm::vec4(-2.5f, -3.5f, 0.0f, 1.0f);
 		float distortionAlpha = 0.2f;
-	} ubo;
-
+	} uniformData;
 	vks::Buffer uniformBuffer;
 
-	VkPipeline pipeline;
-	VkPipelineLayout pipelineLayout;
-	VkDescriptorSet descriptorSet;
-	VkDescriptorSetLayout descriptorSetLayout;
+	VkPipeline pipeline{ VK_NULL_HANDLE };
+	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
+	VkDescriptorSet descriptorSet{ VK_NULL_HANDLE };
+	VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
 
-	VkPipeline viewDisplayPipelines[2];
+	VkPipeline viewDisplayPipelines[2]{};
 
 	VkPhysicalDeviceMultiviewFeaturesKHR physicalDeviceMultiviewFeatures{};
 
@@ -58,7 +55,7 @@ public:
 	const float zNear = 0.1f;
 	const float zFar = 256.0f;
 
-	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
+	VulkanExample() : VulkanExampleBase()
 	{
 		title = "Multiview rendering";
 		camera.type = Camera::CameraType::firstperson;
@@ -80,35 +77,29 @@ public:
 
 	~VulkanExample()
 	{
-		vkDestroyPipeline(device, pipeline, nullptr);
-
-		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-
-		// Multiview pass
-
-		vkDestroyImageView(device, multiviewPass.color.view, nullptr);
-		vkDestroyImage(device, multiviewPass.color.image, nullptr);
-		vkFreeMemory(device, multiviewPass.color.memory, nullptr);
-		vkDestroyImageView(device, multiviewPass.depth.view, nullptr);
-		vkDestroyImage(device, multiviewPass.depth.image, nullptr);
-		vkFreeMemory(device, multiviewPass.depth.memory, nullptr);
-
-		vkDestroyRenderPass(device, multiviewPass.renderPass, nullptr);
-		vkDestroySampler(device, multiviewPass.sampler, nullptr);
-		vkDestroyFramebuffer(device, multiviewPass.frameBuffer, nullptr);
-
-		vkFreeCommandBuffers(device, cmdPool, static_cast<uint32_t>(multiviewPass.commandBuffers.size()), multiviewPass.commandBuffers.data());
-		vkDestroySemaphore(device, multiviewPass.semaphore, nullptr);
-		for (auto& fence : multiviewPass.waitFences) {
-			vkDestroyFence(device, fence, nullptr);
-		}
-
-		for (auto& pipeline : viewDisplayPipelines) {
+		if (device) {
 			vkDestroyPipeline(device, pipeline, nullptr);
+			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+			vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+			vkDestroyImageView(device, multiviewPass.color.view, nullptr);
+			vkDestroyImage(device, multiviewPass.color.image, nullptr);
+			vkFreeMemory(device, multiviewPass.color.memory, nullptr);
+			vkDestroyImageView(device, multiviewPass.depth.view, nullptr);
+			vkDestroyImage(device, multiviewPass.depth.image, nullptr);
+			vkFreeMemory(device, multiviewPass.depth.memory, nullptr);
+			vkDestroyRenderPass(device, multiviewPass.renderPass, nullptr);
+			vkDestroySampler(device, multiviewPass.sampler, nullptr);
+			vkDestroyFramebuffer(device, multiviewPass.frameBuffer, nullptr);
+			vkFreeCommandBuffers(device, cmdPool, static_cast<uint32_t>(multiviewPass.commandBuffers.size()), multiviewPass.commandBuffers.data());
+			vkDestroySemaphore(device, multiviewPass.semaphore, nullptr);
+			for (auto& fence : multiviewPass.waitFences) {
+				vkDestroyFence(device, fence, nullptr);
+			}
+			for (auto& pipeline : viewDisplayPipelines) {
+				vkDestroyPipeline(device, pipeline, nullptr);
+			}
+			uniformBuffer.destroy();
 		}
-
-		uniformBuffer.destroy();
 	}
 
 	/*
@@ -152,8 +143,9 @@ public:
 			depthStencilView.flags = 0;
 			depthStencilView.subresourceRange = {};
 			depthStencilView.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-			if (depthFormat >= VK_FORMAT_D16_UNORM_S8_UINT)
+			if (depthFormat >= VK_FORMAT_D16_UNORM_S8_UINT) {
 				depthStencilView.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+			}
 			depthStencilView.subresourceRange.baseMipLevel = 0;
 			depthStencilView.subresourceRange.levelCount = 1;
 			depthStencilView.subresourceRange.baseArrayLayer = 0;
@@ -460,8 +452,8 @@ public:
 		};
 		VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
-		VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo =vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
 
 		/*
 			Descriptors
@@ -585,13 +577,8 @@ public:
 	// Prepare and initialize uniform buffer containing shader uniforms
 	void prepareUniformBuffers()
 	{
-		VK_CHECK_RESULT(vulkanDevice->createBuffer(
-			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			&uniformBuffer,
-			sizeof(ubo)));
+		VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &uniformBuffer, sizeof(UniformData)));
 		VK_CHECK_RESULT(uniformBuffer.map());
-		updateUniformBuffers();
 	}
 
 	void updateUniformBuffers()
@@ -622,49 +609,24 @@ public:
 		rotM = glm::rotate(rotM, glm::radians(camera.rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
 
 		// Left eye
-		left = -aspectRatio * wd2 + 0.5f * eyeSeparation * ndfl;
-		right = aspectRatio * wd2 + 0.5f * eyeSeparation * ndfl;
-
-		transM = glm::translate(glm::mat4(1.0f), camera.position - camRight * (eyeSeparation / 2.0f));
-
-		ubo.projection[0] = glm::frustum(left, right, bottom, top, zNear, zFar);
-		ubo.modelview[0] = rotM * transM;
-
-		// Right eye
 		left = -aspectRatio * wd2 - 0.5f * eyeSeparation * ndfl;
 		right = aspectRatio * wd2 - 0.5f * eyeSeparation * ndfl;
 
+		transM = glm::translate(glm::mat4(1.0f), camera.position - camRight * (eyeSeparation / 2.0f));
+
+		uniformData.projection[0] = glm::frustum(left, right, bottom, top, zNear, zFar);
+		uniformData.modelview[0] = rotM * transM;
+
+		// Right eye
+		left = -aspectRatio * wd2 + 0.5f * eyeSeparation * ndfl;
+		right = aspectRatio * wd2 + 0.5f * eyeSeparation * ndfl;
+
 		transM = glm::translate(glm::mat4(1.0f), camera.position + camRight * (eyeSeparation / 2.0f));
 
-		ubo.projection[1] = glm::frustum(left, right, bottom, top, zNear, zFar);
-		ubo.modelview[1] = rotM * transM;
+		uniformData.projection[1] = glm::frustum(left, right, bottom, top, zNear, zFar);
+		uniformData.modelview[1] = rotM * transM;
 
-		memcpy(uniformBuffer.mapped, &ubo, sizeof(ubo));
-	}
-
-	void draw()
-	{
-		VulkanExampleBase::prepareFrame();
-
-		// Multiview offscreen render
-		VK_CHECK_RESULT(vkWaitForFences(device, 1, &multiviewPass.waitFences[currentBuffer], VK_TRUE, UINT64_MAX));
-		VK_CHECK_RESULT(vkResetFences(device, 1, &multiviewPass.waitFences[currentBuffer]));
-		submitInfo.pWaitSemaphores = &semaphores.presentComplete;
-		submitInfo.pSignalSemaphores = &multiviewPass.semaphore;
-		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &multiviewPass.commandBuffers[currentBuffer];
-		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, multiviewPass.waitFences[currentBuffer]));
-
-		// View display
-		VK_CHECK_RESULT(vkWaitForFences(device, 1, &waitFences[currentBuffer], VK_TRUE, UINT64_MAX));
-		VK_CHECK_RESULT(vkResetFences(device, 1, &waitFences[currentBuffer]));
-		submitInfo.pWaitSemaphores = &multiviewPass.semaphore;
-		submitInfo.pSignalSemaphores = &semaphores.renderComplete;
-		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
-		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, waitFences[currentBuffer]));
-
-		VulkanExampleBase::submitFrame();
+		memcpy(uniformBuffer.mapped, &uniformData, sizeof(UniformData));
 	}
 
 	void prepare()
@@ -730,19 +692,37 @@ public:
 		}
 	}
 
+	void draw()
+	{
+		VulkanExampleBase::prepareFrame();
+
+		// Multiview offscreen render
+		VK_CHECK_RESULT(vkWaitForFences(device, 1, &multiviewPass.waitFences[currentBuffer], VK_TRUE, UINT64_MAX));
+		VK_CHECK_RESULT(vkResetFences(device, 1, &multiviewPass.waitFences[currentBuffer]));
+		submitInfo.pWaitSemaphores = &semaphores.presentComplete;
+		submitInfo.pSignalSemaphores = &multiviewPass.semaphore;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &multiviewPass.commandBuffers[currentBuffer];
+		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, multiviewPass.waitFences[currentBuffer]));
+
+		// View display
+		VK_CHECK_RESULT(vkWaitForFences(device, 1, &waitFences[currentBuffer], VK_TRUE, UINT64_MAX));
+		VK_CHECK_RESULT(vkResetFences(device, 1, &waitFences[currentBuffer]));
+		submitInfo.pWaitSemaphores = &multiviewPass.semaphore;
+		submitInfo.pSignalSemaphores = &semaphores.renderComplete;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
+		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, waitFences[currentBuffer]));
+
+		VulkanExampleBase::submitFrame();
+	}
+
 	virtual void render()
 	{
 		if (!prepared)
 			return;
-		draw();
-		if (camera.updated) {
-			updateUniformBuffers();
-		}
-	}
-
-	virtual void viewChanged()
-	{
 		updateUniformBuffers();
+		draw();
 	}
 
 	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay)
@@ -751,7 +731,7 @@ public:
 			if (overlay->sliderFloat("Eye separation", &eyeSeparation, -1.0f, 1.0f)) {
 				updateUniformBuffers();
 			}
-			if (overlay->sliderFloat("Barrel distortion", &ubo.distortionAlpha, -0.6f, 0.6f)) {
+			if (overlay->sliderFloat("Barrel distortion", &uniformData.distortionAlpha, -0.6f, 0.6f)) {
 				updateUniformBuffers();
 			}
 		}

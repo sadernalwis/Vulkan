@@ -1,7 +1,7 @@
 /*
 * Vulkan Example - imGui (https://github.com/ocornut/imgui)
 *
-* Copyright (C) 2017 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2017-2024 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -9,8 +9,6 @@
 #include <imgui.h>
 #include "vulkanexamplebase.h"
 #include "VulkanglTFModel.h"
-
-#define ENABLE_VALIDATION false
 
 // Options and values to display/toggle from the UI
 struct UISettings {
@@ -47,6 +45,8 @@ private:
 	vks::VulkanDevice *device;
 	VkPhysicalDeviceDriverProperties driverProperties = {};
 	VulkanExampleBase *example;
+	ImGuiStyle vulkanStyle;
+	int selectedStyle = 0;
 public:
 	// UI params are set via push constants
 	struct PushConstBlock {
@@ -61,9 +61,9 @@ public:
 		
 		//SRS - Set ImGui font and style scale factors to handle retina and other HiDPI displays
 		ImGuiIO& io = ImGui::GetIO();
-		io.FontGlobalScale = example->UIOverlay.scale;
+		io.FontGlobalScale = example->ui.scale;
 		ImGuiStyle& style = ImGui::GetStyle();
-		style.ScaleAllSizes(example->UIOverlay.scale);
+		style.ScaleAllSizes(example->ui.scale);
 	};
 
 	~ImGUI()
@@ -87,16 +87,53 @@ public:
 	void init(float width, float height)
 	{
 		// Color scheme
-		ImGuiStyle& style = ImGui::GetStyle();
-		style.Colors[ImGuiCol_TitleBg] = ImVec4(1.0f, 0.0f, 0.0f, 0.6f);
-		style.Colors[ImGuiCol_TitleBgActive] = ImVec4(1.0f, 0.0f, 0.0f, 0.8f);
-		style.Colors[ImGuiCol_MenuBarBg] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
-		style.Colors[ImGuiCol_Header] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
-		style.Colors[ImGuiCol_CheckMark] = ImVec4(0.0f, 1.0f, 0.0f, 1.0f);
+		vulkanStyle = ImGui::GetStyle();
+		vulkanStyle.Colors[ImGuiCol_TitleBg] = ImVec4(1.0f, 0.0f, 0.0f, 0.6f);
+		vulkanStyle.Colors[ImGuiCol_TitleBgActive] = ImVec4(1.0f, 0.0f, 0.0f, 0.8f);
+		vulkanStyle.Colors[ImGuiCol_MenuBarBg] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
+		vulkanStyle.Colors[ImGuiCol_Header] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
+		vulkanStyle.Colors[ImGuiCol_CheckMark] = ImVec4(0.0f, 1.0f, 0.0f, 1.0f);
+
+		setStyle(0);
+		
 		// Dimensions
 		ImGuiIO& io = ImGui::GetIO();
 		io.DisplaySize = ImVec2(width, height);
 		io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+#if defined(_WIN32)
+		// If we directly work with os specific key codes, we need to map special key types like tab
+		io.KeyMap[ImGuiKey_Tab] = VK_TAB;
+		io.KeyMap[ImGuiKey_LeftArrow] = VK_LEFT;
+		io.KeyMap[ImGuiKey_RightArrow] = VK_RIGHT;
+		io.KeyMap[ImGuiKey_UpArrow] = VK_UP;
+		io.KeyMap[ImGuiKey_DownArrow] = VK_DOWN;
+		io.KeyMap[ImGuiKey_Backspace] = VK_BACK;
+		io.KeyMap[ImGuiKey_Enter] = VK_RETURN;
+		io.KeyMap[ImGuiKey_Space] = VK_SPACE;
+		io.KeyMap[ImGuiKey_Delete] = VK_DELETE;
+#endif
+	}
+
+	void setStyle(uint32_t index)
+	{
+		switch (index)
+		{
+		case 0:
+		{
+			ImGuiStyle& style = ImGui::GetStyle();
+			style = vulkanStyle;
+			break;
+		}
+		case 1:
+			ImGui::StyleColorsClassic();
+			break;
+		case 2:
+			ImGui::StyleColorsDark();
+			break;
+		case 3:
+			ImGui::StyleColorsLight();
+			break;
+		}
 	}
 
 	// Initialize all Vulkan resources used by the ui
@@ -342,9 +379,9 @@ public:
 
 		// Init imGui windows and elements
 
-		// SRS - Set initial position of default Debug window (note: Debug window sets its own initial size, use ImGuiSetCond_Always to override)
-		ImGui::SetWindowPos(ImVec2(20 * example->UIOverlay.scale, 20 * example->UIOverlay.scale), ImGuiSetCond_FirstUseEver);
-        ImGui::SetWindowSize(ImVec2(300 * example->UIOverlay.scale, 300 * example->UIOverlay.scale), ImGuiSetCond_Always);
+		// Debug window
+		ImGui::SetWindowPos(ImVec2(20 * example->ui.scale, 20 * example->ui.scale), ImGuiSetCond_FirstUseEver);
+        ImGui::SetWindowSize(ImVec2(300 * example->ui.scale, 300 * example->ui.scale), ImGuiSetCond_Always);
 		ImGui::TextUnformatted(example->title.c_str());
 		ImGui::TextUnformatted(device->properties.deviceName);
 		
@@ -371,15 +408,21 @@ public:
 		ImGui::InputFloat3("position", &example->camera.position.x, 2);
 		ImGui::InputFloat3("rotation", &example->camera.rotation.x, 2);
 
-		// SRS - Set initial position and size of Example settings window
-		ImGui::SetNextWindowPos(ImVec2(20 * example->UIOverlay.scale, 360 * example->UIOverlay.scale), ImGuiSetCond_FirstUseEver);
-		ImGui::SetNextWindowSize(ImVec2(300 * example->UIOverlay.scale, 200 * example->UIOverlay.scale), ImGuiSetCond_FirstUseEver);
+		// Example settings window
+		ImGui::SetNextWindowPos(ImVec2(20 * example->ui.scale, 360 * example->ui.scale), ImGuiSetCond_FirstUseEver);
+		ImGui::SetNextWindowSize(ImVec2(300 * example->ui.scale, 200 * example->ui.scale), ImGuiSetCond_FirstUseEver);
 		ImGui::Begin("Example settings");
 		ImGui::Checkbox("Render models", &uiSettings.displayModels);
 		ImGui::Checkbox("Display logos", &uiSettings.displayLogos);
 		ImGui::Checkbox("Display background", &uiSettings.displayBackground);
 		ImGui::Checkbox("Animate light", &uiSettings.animateLight);
 		ImGui::SliderFloat("Light speed", &uiSettings.lightSpeed, 0.1f, 1.0f);
+		//ImGui::ShowStyleSelector("UI style");
+
+		if (ImGui::Combo("UI style", &selectedStyle, "Vulkan\0Classic\0Dark\0Light\0")) {
+			setStyle(selectedStyle);
+		}
+
 		ImGui::End();
 
 		//SRS - ShowDemoWindow() sets its own initial position and size, cannot override here
@@ -516,7 +559,7 @@ public:
 	VkDescriptorSetLayout descriptorSetLayout;
 	VkDescriptorSet descriptorSet;
 
-	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
+	VulkanExample() : VulkanExampleBase()
 	{
 		title = "Vulkan Example - ImGui";
 		camera.type = Camera::CameraType::lookat;
@@ -560,7 +603,6 @@ public:
 		renderPassBeginInfo.pClearValues = clearValues;
 
 		imGui->newFrame(this, (frameCounter == 0));
-
 		imGui->updateBuffers();
 
 		for (int32_t i = 0; i < drawCmdBuffers.size(); ++i)
@@ -596,7 +638,7 @@ public:
 			}
 
 			// Render imGui
-			if (UIOverlay.visible) {
+			if (ui.visible) {
 				imGui->drawFrame(drawCmdBuffers[i]);
 			}
 
@@ -625,8 +667,8 @@ public:
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
 
 		// Pipeline layout
-		VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
 
 		// Descriptor set
 		VkDescriptorSetAllocateInfo allocInfo =	vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
@@ -743,33 +785,50 @@ public:
 		if (!prepared)
 			return;
 
+		updateUniformBuffers();
+
 		// Update imGui
 		ImGuiIO& io = ImGui::GetIO();
 
 		io.DisplaySize = ImVec2((float)width, (float)height);
 		io.DeltaTime = frameTimer;
 
-		io.MousePos = ImVec2(mousePos.x, mousePos.y);
-		io.MouseDown[0] = mouseButtons.left && UIOverlay.visible;
-		io.MouseDown[1] = mouseButtons.right && UIOverlay.visible;
-		io.MouseDown[2] = mouseButtons.middle && UIOverlay.visible;
+		io.MousePos = ImVec2(mouseState.position.x, mouseState.position.y);
+		io.MouseDown[0] = mouseState.buttons.left && ui.visible;
+		io.MouseDown[1] = mouseState.buttons.right && ui.visible;
+		io.MouseDown[2] = mouseState.buttons.middle && ui.visible;
 
 		draw();
-
-		if (uiSettings.animateLight)
-			updateUniformBuffers();
-	}
-
-	virtual void viewChanged()
-	{
-		updateUniformBuffers();
 	}
 
 	virtual void mouseMoved(double x, double y, bool &handled)
 	{
 		ImGuiIO& io = ImGui::GetIO();
-		handled = io.WantCaptureMouse && UIOverlay.visible;
+		handled = io.WantCaptureMouse && ui.visible;
 	}
+
+// Input handling is platform specific, to show how it's basically done this sample implements it for Windows
+#if defined(_WIN32)
+	virtual void OnHandleMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+		ImGuiIO& io = ImGui::GetIO();
+		// Only react to keyboard input if ImGui is active
+		if (io.WantCaptureKeyboard) {
+			// Character input
+			if (uMsg == WM_CHAR) {
+				if (wParam > 0 && wParam < 0x10000) {
+					io.AddInputCharacter((unsigned short)wParam);
+				}
+			}
+			// Special keys (tab, cursor, etc.)
+			if ((wParam < 256) && (uMsg == WM_KEYDOWN || uMsg == WM_SYSKEYDOWN)) {
+				io.KeysDown[wParam] = true;
+			}
+			if ((wParam < 256) && (uMsg == WM_KEYUP || uMsg == WM_SYSKEYUP)) {
+				io.KeysDown[wParam] = false;
+			}
+		}
+	}
+#endif
 
 };
 

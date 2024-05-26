@@ -1,19 +1,17 @@
 /*
-* Vulkan Example - Using input attachments
-*
-* Copyright (C) 2018-2021 by Sascha Willems - www.saschawillems.de
-*
-* This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
-*
-* Summary:
-* Input attachments can be used to read attachment contents from a previous sub pass
-* at the same pixel position within a single render pass
-*/
+ * Vulkan Example - Using input attachments
+ *
+ * Copyright (C) 2018-2024 by Sascha Willems - www.saschawillems.de
+ *
+ * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
+ *
+ * Summary:
+ * Input attachments can be used to read attachment contents from a previous sub pass
+ * at the same pixel position within a single render pass
+ */
 
 #include "vulkanexamplebase.h"
 #include "VulkanglTFModel.h"
-
-#define ENABLE_VALIDATION false
 
 class VulkanExample : public VulkanExampleBase
 {
@@ -38,40 +36,40 @@ public:
 	} uniformBuffers;
 
 	struct {
-		VkPipeline attachmentWrite;
-		VkPipeline attachmentRead;
+		VkPipeline attachmentWrite{ VK_NULL_HANDLE };
+		VkPipeline attachmentRead{ VK_NULL_HANDLE };
 	} pipelines;
 
 	struct {
-		VkPipelineLayout attachmentWrite;
-		VkPipelineLayout attachmentRead;
+		VkPipelineLayout attachmentWrite{ VK_NULL_HANDLE };
+		VkPipelineLayout attachmentRead{ VK_NULL_HANDLE };
 	} pipelineLayouts;
 
 	struct {
-		VkDescriptorSet attachmentWrite;
-		std::vector<VkDescriptorSet> attachmentRead;
+		VkDescriptorSet attachmentWrite{ VK_NULL_HANDLE };
+		std::vector<VkDescriptorSet> attachmentRead{ VK_NULL_HANDLE };
 	} descriptorSets;
 
 	struct {
-		VkDescriptorSetLayout attachmentWrite;
-		VkDescriptorSetLayout attachmentRead;
+		VkDescriptorSetLayout attachmentWrite{ VK_NULL_HANDLE };
+		VkDescriptorSetLayout attachmentRead{ VK_NULL_HANDLE };
 	} descriptorSetLayouts;
 
 	struct FrameBufferAttachment {
-		VkImage image = VK_NULL_HANDLE;
-		VkDeviceMemory memory = VK_NULL_HANDLE;
-		VkImageView view = VK_NULL_HANDLE;
+		VkImage image{ VK_NULL_HANDLE };
+		VkDeviceMemory memory{ VK_NULL_HANDLE };
+		VkImageView view{ VK_NULL_HANDLE };
 		VkFormat format;
 	};
 	struct Attachments {
 		FrameBufferAttachment color, depth;
 	};
 	std::vector<Attachments> attachments;
-	VkExtent2D attachmentSize;
+	VkExtent2D attachmentSize{};
 
 	const VkFormat colorFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
-	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
+	VulkanExample() : VulkanExampleBase()
 	{
 		title = "Input attachments";
 		camera.type = Camera::CameraType::firstperson;
@@ -79,34 +77,33 @@ public:
 		camera.setPosition(glm::vec3(1.65f, 1.75f, -6.15f));
 		camera.setRotation(glm::vec3(-12.75f, 380.0f, 0.0f));
 		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);
-		UIOverlay.subpass = 1;
+		ui.subpass = 1;
 	}
 
 	~VulkanExample()
 	{
-		// Clean up used Vulkan resources
-		// Note : Inherited destructor cleans up resources stored in base class
+		if (device) {
+			for (uint32_t i = 0; i < attachments.size(); i++) {
+				vkDestroyImageView(device, attachments[i].color.view, nullptr);
+				vkDestroyImage(device, attachments[i].color.image, nullptr);
+				vkFreeMemory(device, attachments[i].color.memory, nullptr);
+				vkDestroyImageView(device, attachments[i].depth.view, nullptr);
+				vkDestroyImage(device, attachments[i].depth.image, nullptr);
+				vkFreeMemory(device, attachments[i].depth.memory, nullptr);
+			}
 
-		for (uint32_t i = 0; i < attachments.size(); i++) {
-			vkDestroyImageView(device, attachments[i].color.view, nullptr);
-			vkDestroyImage(device, attachments[i].color.image, nullptr);
-			vkFreeMemory(device, attachments[i].color.memory, nullptr);
-			vkDestroyImageView(device, attachments[i].depth.view, nullptr);
-			vkDestroyImage(device, attachments[i].depth.image, nullptr);
-			vkFreeMemory(device, attachments[i].depth.memory, nullptr);
+			vkDestroyPipeline(device, pipelines.attachmentRead, nullptr);
+			vkDestroyPipeline(device, pipelines.attachmentWrite, nullptr);
+
+			vkDestroyPipelineLayout(device, pipelineLayouts.attachmentWrite, nullptr);
+			vkDestroyPipelineLayout(device, pipelineLayouts.attachmentRead, nullptr);
+
+			vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.attachmentWrite, nullptr);
+			vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.attachmentRead, nullptr);
+
+			uniformBuffers.matrices.destroy();
+			uniformBuffers.params.destroy();
 		}
-
-		vkDestroyPipeline(device, pipelines.attachmentRead, nullptr);
-		vkDestroyPipeline(device, pipelines.attachmentWrite, nullptr);
-
-		vkDestroyPipelineLayout(device, pipelineLayouts.attachmentWrite, nullptr);
-		vkDestroyPipelineLayout(device, pipelineLayouts.attachmentRead, nullptr);
-
-		vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.attachmentWrite, nullptr);
-		vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.attachmentRead, nullptr);
-
-		uniformBuffers.matrices.destroy();
-		uniformBuffers.params.destroy();
 	}
 
 	void clearAttachment(FrameBufferAttachment* attachment)
@@ -310,9 +307,9 @@ public:
 		dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
 		dependencies[0].dstSubpass = 0;
 		dependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-		dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
 		dependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-		dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 		dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
 		// This dependency transitions the input attachment from color attachment to shader read
@@ -379,13 +376,13 @@ public:
 				Fills the attachments
 			*/
 			{
-				vks::debugmarker::beginRegion(drawCmdBuffers[i], "Subpass 0: Writing attachments", glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+				vks::debugutils::cmdBeginLabel(drawCmdBuffers[i], "Subpass 0: Writing attachments", { 1.0f, 0.78f, 0.05f, 1.0f });
 
 				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.attachmentWrite);
 				vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.attachmentWrite, 0, 1, &descriptorSets.attachmentWrite, 0, NULL);
 				scene.draw(drawCmdBuffers[i]);
 
-				vks::debugmarker::endRegion(drawCmdBuffers[i]);
+				vks::debugutils::cmdEndLabel(drawCmdBuffers[i]);
 			}
 
 			/*
@@ -393,7 +390,7 @@ public:
 				Render a full screen quad, reading from the previously written attachments via input attachments
 			*/
 			{
-				vks::debugmarker::beginRegion(drawCmdBuffers[i], "Subpass 1: Reading attachments", glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+				vks::debugutils::cmdBeginLabel(drawCmdBuffers[i], "Subpass 1: Reading attachments", { 0.0f, 0.5f, 1.0f, 1.0f });
 
 				vkCmdNextSubpass(drawCmdBuffers[i], VK_SUBPASS_CONTENTS_INLINE);
 
@@ -401,7 +398,7 @@ public:
 				vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.attachmentRead, 0, 1, &descriptorSets.attachmentRead[i], 0, NULL);
 				vkCmdDraw(drawCmdBuffers[i], 3, 1, 0, 0);
 
-				vks::debugmarker::endRegion(drawCmdBuffers[i]);
+				vks::debugutils::cmdEndLabel(drawCmdBuffers[i]);
 			}
 
 			drawUI(drawCmdBuffers[i]);
@@ -442,11 +439,11 @@ public:
 			Pool
 		*/
 		std::vector<VkDescriptorPoolSize> poolSizes = {
-			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, attachments.size() + 1),
-			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, attachments.size() + 1),
-			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, attachments.size() * 2 + 1),
+			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, static_cast<uint32_t>(attachments.size()) + 1),
+			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(attachments.size()) + 1),
+			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, static_cast<uint32_t>(attachments.size()) * 2 + 1),
 		};
-		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(static_cast<uint32_t>(poolSizes.size()), poolSizes.data(), attachments.size() + 1);
+		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(static_cast<uint32_t>(poolSizes.size()), poolSizes.data(), static_cast<uint32_t>(attachments.size()) + 1);
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
 
 		/*
@@ -459,8 +456,8 @@ public:
 			VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 			VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayouts.attachmentWrite));
 
-			VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayouts.attachmentWrite, 1);
-			VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayouts.attachmentWrite));
+			VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayouts.attachmentWrite, 1);
+			VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayouts.attachmentWrite));
 
 			VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.attachmentWrite, 1);
 			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets.attachmentWrite));
@@ -598,15 +595,8 @@ public:
 	{
 		if (!prepared)
 			return;
-		draw();
-		if (camera.updated) {
-			updateUniformBuffers();
-		}
-	}
-
-	virtual void viewChanged()
-	{
 		updateUniformBuffers();
+		draw();
 	}
 
 	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay)

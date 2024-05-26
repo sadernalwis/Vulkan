@@ -1,3 +1,6 @@
+# Copyright (c) 2016-2024, Sascha Willems
+# SPDX-License-Identifier: MIT
+
 # Function for building single example
 function(buildExample EXAMPLE_NAME)
 	SET(EXAMPLE_FOLDER ${CMAKE_CURRENT_SOURCE_DIR}/${EXAMPLE_NAME})
@@ -21,10 +24,10 @@ function(buildExample EXAMPLE_NAME)
 		SET(SOURCE ${SOURCE} ${CMAKE_BINARY_DIR}/xdg-shell-client-protocol.h ${CMAKE_BINARY_DIR}/xdg-shell-protocol.c)
 	ENDIF()
 	# Add shaders
-	set(SHADER_DIR_GLSL "../data/shaders/glsl/${EXAMPLE_NAME}")
-	file(GLOB SHADERS_GLSL "${SHADER_DIR_GLSL}/*.vert" "${SHADER_DIR_GLSL}/*.frag" "${SHADER_DIR_GLSL}/*.comp" "${SHADER_DIR_GLSL}/*.geom" "${SHADER_DIR_GLSL}/*.tesc" "${SHADER_DIR_GLSL}/*.tese" "${SHADER_DIR_GLSL}/*.mesh" "${SHADER_DIR_GLSL}/*.task" "${SHADER_DIR_GLSL}/*.rgen" "${SHADER_DIR_GLSL}/*.rchit" "${SHADER_DIR_GLSL}/*.rmiss" "${SHADER_DIR_GLSL}/*.rcall")
-	set(SHADER_DIR_HLSL "../data/shaders/hlsl/${EXAMPLE_NAME}")
-	file(GLOB SHADERS_HLSL "${SHADER_DIR_HLSL}/*.vert" "${SHADER_DIR_HLSL}/*.frag" "${SHADER_DIR_HLSL}/*.comp" "${SHADER_DIR_HLSL}/*.geom" "${SHADER_DIR_HLSL}/*.tesc" "${SHADER_DIR_HLSL}/*.tese" "${SHADER_DIR_HLSL}/*.mesh" "${SHADER_DIR_HLSL}/*.task" "${SHADER_DIR_HLSL}/*.rgen" "${SHADER_DIR_HLSL}/*.rchit" "${SHADER_DIR_HLSL}/*.rmiss" "${SHADER_DIR_HLSL}/*.rcall")
+	set(SHADER_DIR_GLSL "../shaders/glsl/${EXAMPLE_NAME}")
+	file(GLOB SHADERS_GLSL "${SHADER_DIR_GLSL}/*.vert" "${SHADER_DIR_GLSL}/*.frag" "${SHADER_DIR_GLSL}/*.comp" "${SHADER_DIR_GLSL}/*.geom" "${SHADER_DIR_GLSL}/*.tesc" "${SHADER_DIR_GLSL}/*.tese" "${SHADER_DIR_GLSL}/*.mesh" "${SHADER_DIR_GLSL}/*.task" "${SHADER_DIR_GLSL}/*.rgen" "${SHADER_DIR_GLSL}/*.rchit" "${SHADER_DIR_GLSL}/*.rmiss" "${SHADER_DIR_GLSL}/*.rcall" "${SHADER_DIR_GLSL}/*.rahit" "${SHADER_DIR_GLSL}/*.rint" "${SHADER_DIR_GLSL}/*.glsl")
+	set(SHADER_DIR_HLSL "../shaders/hlsl/${EXAMPLE_NAME}")
+	file(GLOB SHADERS_HLSL "${SHADER_DIR_HLSL}/*.vert" "${SHADER_DIR_HLSL}/*.frag" "${SHADER_DIR_HLSL}/*.comp" "${SHADER_DIR_HLSL}/*.geom" "${SHADER_DIR_HLSL}/*.tesc" "${SHADER_DIR_HLSL}/*.tese" "${SHADER_DIR_HLSL}/*.mesh" "${SHADER_DIR_HLSL}/*.task" "${SHADER_DIR_HLSL}/*.rgen" "${SHADER_DIR_HLSL}/*.rchit" "${SHADER_DIR_HLSL}/*.rmiss" "${SHADER_DIR_HLSL}/*.rcall" "${SHADER_DIR_HLSL}/*.rahit" "${SHADER_DIR_HLSL}/*.rint")
 	source_group("Shaders\\GLSL" FILES ${SHADERS_GLSL})
 	source_group("Shaders\\HLSL" FILES ${SHADERS_HLSL})
 	# Add optional readme / tutorial
@@ -37,6 +40,7 @@ function(buildExample EXAMPLE_NAME)
 		target_link_libraries(${EXAMPLE_NAME} base )
 	endif(WIN32)
 
+	file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 	set_target_properties(${EXAMPLE_NAME} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 	if(${EXAMPLE_NAME} STREQUAL "texture3d")
 		if(APPLE)
@@ -61,7 +65,9 @@ function(buildExample EXAMPLE_NAME)
 		endif()
 		find_package(OpenMP)
 		if(OpenMP_CXX_FOUND)
-   			target_link_libraries(${EXAMPLE_NAME} OpenMP::OpenMP_CXX)
+			set_target_properties(${EXAMPLE_NAME} PROPERTIES COMPILE_FLAGS ${OpenMP_CXX_FLAGS})
+			target_include_directories(${EXAMPLE_NAME} PRIVATE ${OpenMP_CXX_INCLUDE_DIRS})
+			target_link_libraries(${EXAMPLE_NAME} ${OpenMP_CXX_LIBRARIES})
 		endif()
 	endif()
 
@@ -88,7 +94,8 @@ set(EXAMPLES
 	computeshader
 	conditionalrender
 	conservativeraster
-	debugmarker
+	debugprintf
+	debugutils
 	deferred
 	deferredmultisampling
 	deferredshadows
@@ -121,7 +128,7 @@ set(EXAMPLES
 	offscreen
 	oit
 	parallaxmapping
-	particlefire
+	particlesystem
 	pbrbasic
 	pbribl
 	pbrtexture
@@ -133,11 +140,16 @@ set(EXAMPLES
 	rayquery
 	raytracingbasic
 	raytracingcallable
+	raytracinggltf
+	raytracingintersection
 	raytracingreflections
+	raytracingpositionfetch
 	raytracingsbtdata
-	raytracingshadows	
+	raytracingshadows
+	raytracingtextures
 	renderheadless
 	screenshot
+	shaderobjects
 	shadowmapping
 	shadowmappingomni
 	shadowmappingcascade

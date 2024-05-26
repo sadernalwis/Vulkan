@@ -1,7 +1,7 @@
 /*
 * Vulkan Example - Using VK_EXT_graphics_pipeline_library
-* 
-* Copyright (C) 2022 by Sascha Willems - www.saschawillems.de
+*
+* Copyright (C) 2022-2023 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -11,8 +11,6 @@
 #include <thread>
 #include <mutex>
 
-#define ENABLE_VALIDATION false
-
 class VulkanExample: public VulkanExampleBase
 {
 public:
@@ -20,16 +18,16 @@ public:
 
 	vkglTF::Model scene;
 
-	struct UBOVS {
+	struct UniformData {
 		glm::mat4 projection;
 		glm::mat4 modelView;
 		glm::vec4 lightPos = glm::vec4(0.0f, -2.0f, 1.0f, 0.0f);
-	} uboVS;
+	} uniformData;
 	vks::Buffer uniformBuffer;
 
-	VkPipelineLayout pipelineLayout;
-	VkDescriptorSet descriptorSet;
-	VkDescriptorSetLayout descriptorSetLayout;
+	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
+	VkDescriptorSet descriptorSet{ VK_NULL_HANDLE };
+	VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
 
 	VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT graphicsPipelineLibraryFeatures{};
 
@@ -58,7 +56,7 @@ public:
 	std::vector<glm::vec3> colors{};
 	float rotation{ 0.0f };
 
-	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
+	VulkanExample() : VulkanExampleBase()
 	{
 		title = "Graphics pipeline library";
 		camera.type = Camera::CameraType::lookat;
@@ -169,36 +167,30 @@ public:
 		scene.loadFromFile(getAssetPath() + "models/color_teapot_spheres.gltf", vulkanDevice, queue, glTFLoadingFlags);
 	}
 
-	void setupDescriptorPool()
+	void setupDescriptors()
 	{
+		// Pool
 		std::vector<VkDescriptorPoolSize> poolSizes = {
 			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1)
 		};
 		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 2);
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
-	}
 
-	void setupDescriptorSetLayout()
-	{
+		// Layout
 		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0)
 		};
 		VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
 
-		VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayout));
-	}
-
-	void setupDescriptorSet()
-	{
+		// Set
 		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
 
 		std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
 			vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffer.descriptor)
 		};
-		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, nullptr);
+		vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 	}
 
 	// With VK_EXT_graphics_pipeline_library we don't need to create the shader module when loading it, but instead have the driver create it at linking time
@@ -207,7 +199,6 @@ public:
 	{
 #if defined(__ANDROID__)
 		// Load shader from compressed asset
-		// @todo
 		AAsset* asset = AAssetManager_open(androidApp->activity->assetManager, fileName, AASSET_MODE_STREAMING);
 		assert(asset);
 		size_t size = AAsset_getLength(asset);
@@ -239,6 +230,10 @@ public:
 	// Create the shared pipeline parts up-front
 	void preparePipelineLibrary()
 	{
+		// Shared layout
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+
 		// Create a pipeline library for the vertex input interface
 		{
 			VkGraphicsPipelineLibraryCreateInfoEXT libraryInfo{};
@@ -280,7 +275,6 @@ public:
 
 			VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
 
-			// @todo: we can skip the pipeline shader module info and directly consume the shader module
 			ShaderInfo shaderInfo{};
 			loadShaderFile(getShadersPath() + "graphicspipelinelibrary/shared.vert.spv", shaderInfo);
 
@@ -307,6 +301,8 @@ public:
 			pipelineLibraryCI.pViewportState = &viewportState;
 			pipelineLibraryCI.pRasterizationState = &rasterizationState;
 			VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineLibraryCI, nullptr, &pipelineLibrary.preRasterizationShaders));
+
+			delete[] shaderInfo.code;
 		}
 
 		// Create a pipeline library for the fragment output interface
@@ -378,7 +374,7 @@ public:
 		shaderStageCI.pName = "main";
 
 		// Select lighting model using a specialization constant
-		srand((unsigned int)time(NULL));
+		srand(benchmark.active ? 0 : ((unsigned int)time(NULL)));
 		uint32_t lighting_model = (int)(rand() % 4);
 
 		// Each shader constant of a shader stage corresponds to one map entry
@@ -442,6 +438,8 @@ public:
 		pipelines.push_back(executable);
 		// Push fragment shader to list for deletion in the sample's destructor
 		pipelineLibrary.fragmentShaders.push_back(fragmentShader);
+
+		delete[] shaderInfo.code;
 	}
 
 	// Prepare and initialize uniform buffer containing shader uniforms
@@ -452,7 +450,7 @@ public:
 			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 			&uniformBuffer,
-			sizeof(uboVS)));
+			sizeof(UniformData)));
 
 		// Map persistent
 		VK_CHECK_RESULT(uniformBuffer.map());
@@ -466,19 +464,17 @@ public:
 			rotation += frameTimer * 0.1f;
 		}
 		camera.setPerspective(45.0f, ((float)width / (float)splitX) / ((float)height / (float)splitY), 0.1f, 256.0f);
-		uboVS.projection = camera.matrices.perspective;
-		uboVS.modelView = camera.matrices.view * glm::rotate(glm::mat4(1.0f), glm::radians(rotation * 360.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-		memcpy(uniformBuffer.mapped, &uboVS, sizeof(uboVS));
+		uniformData.projection = camera.matrices.perspective;
+		uniformData.modelView = camera.matrices.view * glm::rotate(glm::mat4(1.0f), glm::radians(rotation * 360.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		memcpy(uniformBuffer.mapped, &uniformData, sizeof(UniformData));
 	}
 
 	void draw()
 	{
 		VulkanExampleBase::prepareFrame();
-
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
 		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
-
 		VulkanExampleBase::submitFrame();
 	}
 
@@ -487,10 +483,8 @@ public:
 		VulkanExampleBase::prepare();
 		loadAssets();
 		prepareUniformBuffers();
-		setupDescriptorSetLayout();
+		setupDescriptors();
 		preparePipelineLibrary();
-		setupDescriptorPool();
-		setupDescriptorSet();
 		buildCommandBuffers();
 
 		// Create a separate pipeline cache for the pipeline creation thread
@@ -515,8 +509,8 @@ public:
 			vkQueueWaitIdle(queue);
 			buildCommandBuffers();
 		}
-		draw();
 		updateUniformBuffers();
+		draw();
 	}
 
 	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay)

@@ -32,14 +32,14 @@ A comprehensive collection of open source C++ examples for [Vulkan®](https://ww
 
 ## Official Khronos Vulkan Samples
 
-Khronos recently made an official Vulkan Samples repository available to the public ([press release](https://www.khronos.org/blog/vulkan-releases-unified-samples-repository?utm_source=Khronos%20Blog&utm_medium=Twitter&utm_campaign=Vulkan%20Repository)).
+Khronos has made an official Vulkan Samples repository available to the public ([press release](https://www.khronos.org/blog/vulkan-releases-unified-samples-repository?utm_source=Khronos%20Blog&utm_medium=Twitter&utm_campaign=Vulkan%20Repository)).
 
 You can find this repository at https://github.com/KhronosGroup/Vulkan-Samples
 
 As I've been involved with getting the official repository up and running, I'll be mostly contributing to that repository from now, but may still add samples that don't fit there in here and I'll of course continue to maintain these samples.
 
 ## Cloning
-This repository contains submodules for external dependencies, so when doing a fresh clone you need to clone recursively:
+This repository contains submodules for external dependencies and assets, so when doing a fresh clone you need to clone recursively:
 
 ```
 git clone --recursive https://github.com/SaschaWillems/Vulkan.git
@@ -53,15 +53,12 @@ git submodule update
 ```
 
 ## Assets
-Many examples require assets from the asset pack that is not part of this repository due to file size. A python script is included to download the asset pack that. Run
 
-    python download_assets.py
-
-from the root of the repository after cloning or see [this](data/README.md) for manual download.
+**Important notice:** As of may 2023 assets have been moved to a [submodule](https://github.com/SaschaWillems/Vulkan-Assets). If you have cloned the repository before this date, you may need to initialize and update submodules. If you do a fresh clone, no action is required to get the assets.
 
 ## Building
 
-The repository contains everything required to compile and build the examples on <img src="./images/windowslogo.png" alt="" height="22px" valign="bottom"> Windows, <img src="./images/linuxlogo.png" alt="" height="24px" valign="bottom"> Linux, <img src="./images/androidlogo.png" alt="" height="24px" valign="bottom"> Android, <img src="./images/applelogo.png" alt="" valign="bottom" height="24px"> iOS and macOS (using MoltenVK) using a C++ compiler that supports C++11.
+The repository contains everything required to compile and build the examples on <img src="./images/windowslogo.png" alt="" height="22px" valign="bottom"> Windows, <img src="./images/linuxlogo.png" alt="" height="24px" valign="bottom"> Linux, <img src="./images/androidlogo.png" alt="" height="24px" valign="bottom"> Android, <img src="./images/applelogo.png" alt="" valign="bottom" height="24px"> iOS and macOS (using MoltenVK) using a C++ compiler that supports C++14.
 
 See [BUILD.md](BUILD.md) for details on how to build for the different platforms.
 
@@ -89,7 +86,7 @@ Note that some examples require specific device features, and if you are on a mu
 
 ## Shaders
 
-Vulkan consumes shaders in an intermediate representation called SPIR-V. This makes it possible to use different shader languages by compiling them to that bytecode format. The primary shader language used here is [GLSL](data/shaders/glsl) but thanks to an external contribution you'll also find [HLSL](data/shaders/hlsl) shader sources.
+Vulkan consumes shaders in an intermediate representation called SPIR-V. This makes it possible to use different shader languages by compiling them to that bytecode format. The primary shader language used here is [GLSL](shaders/glsl) but most samples also come with [HLSL](shaders/hlsl) shader sources.
 
 ## A note on synchronization
 
@@ -155,7 +152,7 @@ Advanced example that uses sub passes and input attachments to write and read ba
 
 Basic offscreen rendering in two passes. First pass renders the mirrored scene to a separate framebuffer with color and depth attachments, second pass samples from that color attachment for rendering a mirror surface.
 
-#### [CPU particle system](examples/particlefire/)
+#### [CPU particle system](examples/particlesystem/)
 
 Implements a simple CPU based particle system. Particle data is stored in host memory, updated on the CPU per-frame and synchronized with the device before it's rendered using pre-multiplied alpha.
 
@@ -340,13 +337,29 @@ Adds ray traced shadows casting using the new ray tracing extensions to a more c
 
 Renders a complex scene with reflective surfaces using the new ray tracing extensions. Shows how to do recursion inside of the ray tracing shaders for implementing real time reflections.
 
+#### [Ray traced texture mapping](examples/raytracingtextures)
+
+Renders a texture mapped quad with transparency using the new ray tracing extensions. Shows how to do texture mapping in a closes hit shader, how to cancel intersections for transparency in an any hit shader and how to access mesh data in those shaders using buffer device addresses.
+
 #### [Callable ray tracing shaders](examples/raytracingcallable)
 
 Callable shaders can be dynamically invoked from within other ray tracing shaders to execute different shaders based on dynamic conditions. The example ray traces multiple geometries, with each calling a different callable shader from the closest hit shader.
 
+#### [Ray tracing intersection shaders](examples/raytracingintersection)
+
+Uses an intersection shader for procedural geometry. Instead of using actual geometry, this sample on passes bounding boxes and object definitions. An intersection shader is then used to trace against the procedural objects.
+
+#### [Ray traced glTF](examples/raytracinggltf/)
+
+Renders a textured glTF model using ray traying instead of rasterization. Makes use of frame accumulation for transparency and anti aliasing.
+
 #### [Ray query](examples/rayquery)
 
 Ray queries add acceleration structure intersection functionality to non ray tracing shader stages. This allows for combining ray tracing with rasterization. This example makes uses ray queries to add ray casted shadows to a rasterized sample in the fragment shader.
+
+#### [Position fetch](examples/raytracingpositionfetch/)
+
+Uses the `VK_KHR_ray_tracing_position_fetch` extension to fetch vertex position data from the acceleration structure from within a shader, instead of having to manually unpack vertex information. 
 
 ### Headless
 
@@ -414,17 +427,23 @@ Renders a scene to to multiple views (layers) of a single framebuffer to simulat
 
 Demonstrates the use of VK_EXT_conditional_rendering to conditionally dispatch render commands based on values from a dedicated buffer. This allows e.g. visibility toggles without having to rebuild command buffers ([blog post](https://www.saschawillems.de/tutorials/vulkan/conditional_rendering)).
 
-#### [Debug markers (VK_EXT_debug_marker)](examples/debugmarker/)
+#### [Debug shader printf (VK_KHR_shader_non_semantic_info)](examples/debugprintf/)
 
-<span style="color:red">This sample is deprecated</span>
+Shows how to use printf in a shader to output additional information per invocation. This information can help debugging shader related issues in tools like RenderDoc.
 
-An updated version using ```VK_EXT_debug_utils``` along with an in-depth tutorial is available in the [Official Khronos Vulkan Samples repository](https://github.com/KhronosGroup/Vulkan-Samples/blob/master/samples/extensions/debug_utils).
+**Note:** This sample should be run from a graphics debugger like RenderDoc.
+
+#### [Debug utils (VK_EXT_debug_utils)](examples/debugutils/)
+
+Shows how to use debug utils for adding labels and colors to Vulkan objects for graphics debuggers. This information helps to identify resources in tools like RenderDoc.
+
+**Note:** This sample should be run from a graphics debugger like RenderDoc.
 
 #### [Negative viewport height (VK_KHR_Maintenance1 or Vulkan 1.1)](examples/negativeviewportheight/)
 
 Shows how to render a scene using a negative viewport height, making the Vulkan render setup more similar to other APIs like OpenGL. Also has several options for changing relevant pipeline state, and displaying meshes with OpenGL or Vulkan style coordinates. Details can be found in [this tutorial](https://www.saschawillems.de/tutorials/vulkan/flipping-viewport).
 
-#### [Variable rate shading (VK_NV_shading_rate_image)](examples/variablerateshading/)
+#### [Variable rate shading (VK_KHR_fragment_shading_rate)](examples/variablerateshading/)
 
 Uses a special image that contains variable shading rates to vary the number of fragment shader invocations across the framebuffer. This makes it possible to lower fragment shader invocations for less important/less noisy parts of the framebuffer.
 
@@ -446,6 +465,10 @@ Basic sample demonstrating how to use the mesh shading pipeline as a replacement
 #### [Descriptor buffers (VK_EXT_descriptor_buffer)](./examples/descriptorbuffer/)<br/>
 
 Basic sample showing how to use descriptor buffers to replace descriptor sets.
+
+#### [Shader objects (VK_EXT_shader_object)](./examples/shaderobjects/)<br/>
+
+Basic sample showing how to use shader objects that can be used to replace pipeline state objects. Instead of baking all state in a PSO, shaders are explicitly loaded and bound as separate objects and state is set using dynamic state extensions. The sample also stores binary shader objets and loads them on consecutive runs.
 
 ### Misc
 

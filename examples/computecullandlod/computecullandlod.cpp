@@ -1,7 +1,7 @@
 /*
 * Vulkan Example - Compute shader culling and LOD using indirect rendering
 *
-* Copyright (C) 2016-2022 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2016-2023 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 *
@@ -11,9 +11,6 @@
 #include "VulkanglTFModel.h"
 #include "frustum.hpp"
 
-#define VERTEX_BUFFER_BIND_ID 0
-#define INSTANCE_BUFFER_BIND_ID 1
-#define ENABLE_VALIDATION false
 
 // Total number of objects (^3) in the scene
 #if defined(__ANDROID__)
@@ -91,7 +88,7 @@ public:
 
 	uint32_t objectCount = 0;
 
-	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
+	VulkanExample() : VulkanExampleBase()
 	{
 		title = "Vulkan Example - Compute cull and lod";
 		camera.type = Camera::CameraType::firstperson;
@@ -103,20 +100,22 @@ public:
 
 	~VulkanExample()
 	{
-		vkDestroyPipeline(device, pipelines.plants, nullptr);
-		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-		instanceBuffer.destroy();
-		indirectCommandsBuffer.destroy();
-		uniformData.scene.destroy();
-		indirectDrawCountBuffer.destroy();
-		compute.lodLevelsBuffers.destroy();
-		vkDestroyPipelineLayout(device, compute.pipelineLayout, nullptr);
-		vkDestroyDescriptorSetLayout(device, compute.descriptorSetLayout, nullptr);
-		vkDestroyPipeline(device, compute.pipeline, nullptr);
-		vkDestroyFence(device, compute.fence, nullptr);
-		vkDestroyCommandPool(device, compute.commandPool, nullptr);
-		vkDestroySemaphore(device, compute.semaphore, nullptr);
+		if (device) {
+			vkDestroyPipeline(device, pipelines.plants, nullptr);
+			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+			vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+			instanceBuffer.destroy();
+			indirectCommandsBuffer.destroy();
+			uniformData.scene.destroy();
+			indirectDrawCountBuffer.destroy();
+			compute.lodLevelsBuffers.destroy();
+			vkDestroyPipelineLayout(device, compute.pipelineLayout, nullptr);
+			vkDestroyDescriptorSetLayout(device, compute.descriptorSetLayout, nullptr);
+			vkDestroyPipeline(device, compute.pipeline, nullptr);
+			vkDestroyFence(device, compute.fence, nullptr);
+			vkDestroyCommandPool(device, compute.commandPool, nullptr);
+			vkDestroySemaphore(device, compute.semaphore, nullptr);
+		}
 	}
 
 	virtual void getEnabledFeatures()
@@ -188,8 +187,8 @@ public:
 
 			// Mesh containing the LODs
 			vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.plants);
-			vkCmdBindVertexBuffers(drawCmdBuffers[i], VERTEX_BUFFER_BIND_ID, 1, &lodModel.vertices.buffer, offsets);
-			vkCmdBindVertexBuffers(drawCmdBuffers[i], INSTANCE_BUFFER_BIND_ID, 1, &instanceBuffer.buffer, offsets);
+			vkCmdBindVertexBuffers(drawCmdBuffers[i], 0, 1, &lodModel.vertices.buffer, offsets);
+			vkCmdBindVertexBuffers(drawCmdBuffers[i], 1, 1, &instanceBuffer.buffer, offsets);
 
 			vkCmdBindIndexBuffer(drawCmdBuffers[i], lodModel.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
 
@@ -336,18 +335,17 @@ public:
 		vkEndCommandBuffer(compute.commandBuffer);
 	}
 
-	void setupDescriptorPool()
+	void setupDescriptors()
 	{
+		// Pool
 		std::vector<VkDescriptorPoolSize> poolSizes = {
 			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2),
 			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4)
 		};
 		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 2);
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
-	}
 
-	void setupDescriptorSetLayout()
-	{
+		// Layout
 		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
 			// Binding 0: Vertex shader uniform buffer
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT,0),
@@ -355,15 +353,9 @@ public:
 		VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
 
-		VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);		 
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayout));
-	}
-
-	void setupDescriptorSet()
-	{
+		// Set
 		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
-
 		std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
 			// Binding 0: Vertex shader uniform buffer
 			vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformData.scene.descriptor),
@@ -373,6 +365,10 @@ public:
 
 	void preparePipelines()
 	{
+		// Layout
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+
 		// This example uses two different input states, one for the instanced part and one for non-instanced rendering
 		VkPipelineVertexInputStateCreateInfo inputState = vks::initializers::pipelineVertexInputStateCreateInfo();
 		std::vector<VkVertexInputBindingDescription> bindingDescriptions;
@@ -382,22 +378,22 @@ public:
 		// The instancing pipeline uses a vertex input state with two bindings
 		bindingDescriptions = {
 		    // Binding point 0: Mesh vertex layout description at per-vertex rate
-		    vks::initializers::vertexInputBindingDescription(VERTEX_BUFFER_BIND_ID, sizeof(vkglTF::Vertex), VK_VERTEX_INPUT_RATE_VERTEX),
+		    vks::initializers::vertexInputBindingDescription(0, sizeof(vkglTF::Vertex), VK_VERTEX_INPUT_RATE_VERTEX),
 		    // Binding point 1: Instanced data at per-instance rate
-		    vks::initializers::vertexInputBindingDescription(INSTANCE_BUFFER_BIND_ID, sizeof(InstanceData), VK_VERTEX_INPUT_RATE_INSTANCE)
+		    vks::initializers::vertexInputBindingDescription(1, sizeof(InstanceData), VK_VERTEX_INPUT_RATE_INSTANCE)
 		};
 
 		// Vertex attribute bindings
 		attributeDescriptions = {
 		    // Per-vertex attributes
 		    // These are advanced for each vertex fetched by the vertex shader
-		    vks::initializers::vertexInputAttributeDescription(VERTEX_BUFFER_BIND_ID, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(vkglTF::Vertex, pos)),	// Location 0: Position
-		    vks::initializers::vertexInputAttributeDescription(VERTEX_BUFFER_BIND_ID, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(vkglTF::Vertex, normal)),	// Location 1: Normal
-		    vks::initializers::vertexInputAttributeDescription(VERTEX_BUFFER_BIND_ID, 2, VK_FORMAT_R32G32B32_SFLOAT, offsetof(vkglTF::Vertex, color)),	// Location 2: Texture coordinates
+		    vks::initializers::vertexInputAttributeDescription(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(vkglTF::Vertex, pos)),	// Location 0: Position
+		    vks::initializers::vertexInputAttributeDescription(0, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(vkglTF::Vertex, normal)),	// Location 1: Normal
+		    vks::initializers::vertexInputAttributeDescription(0, 2, VK_FORMAT_R32G32B32_SFLOAT, offsetof(vkglTF::Vertex, color)),	// Location 2: Texture coordinates
 		    // Per-Instance attributes
 		    // These are fetched for each instance rendered
-		    vks::initializers::vertexInputAttributeDescription(INSTANCE_BUFFER_BIND_ID, 4, VK_FORMAT_R32G32B32_SFLOAT, offsetof(InstanceData, pos)),	// Location 4: Position
-		    vks::initializers::vertexInputAttributeDescription(INSTANCE_BUFFER_BIND_ID, 5, VK_FORMAT_R32_SFLOAT, offsetof(InstanceData, scale)),		// Location 5: Scale
+		    vks::initializers::vertexInputAttributeDescription(1, 4, VK_FORMAT_R32G32B32_SFLOAT, offsetof(InstanceData, pos)),	// Location 4: Position
+		    vks::initializers::vertexInputAttributeDescription(1, 5, VK_FORMAT_R32_SFLOAT, offsetof(InstanceData, scale)),		// Location 5: Scale
 		};
 		inputState.pVertexBindingDescriptions = bindingDescriptions.data();
 		inputState.pVertexAttributeDescriptions = attributeDescriptions.data();
@@ -593,7 +589,7 @@ public:
 
 		VK_CHECK_RESULT(uniformData.scene.map());
 
-		updateUniformBuffer(true);
+		updateUniformBuffer();
 	}
 
 	void prepareCompute()
@@ -639,19 +635,10 @@ public:
 
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &compute.descriptorSetLayout));
 
-		VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
-			vks::initializers::pipelineLayoutCreateInfo(
-				&compute.descriptorSetLayout,
-				1);
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&compute.descriptorSetLayout, 1);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &compute.pipelineLayout));
 
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &compute.pipelineLayout));
-
-		VkDescriptorSetAllocateInfo allocInfo =
-			vks::initializers::descriptorSetAllocateInfo(
-				descriptorPool,
-				&compute.descriptorSetLayout,
-				1);
-
+		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &compute.descriptorSetLayout, 1);
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &compute.descriptorSet));
 
 		std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets =
@@ -739,21 +726,29 @@ public:
 		buildComputeCommandBuffer();
 	}
 
-	void updateUniformBuffer(bool viewChanged)
+	void updateUniformBuffer()
 	{
-		if (viewChanged)
+		uboScene.projection = camera.matrices.perspective;
+		uboScene.modelview = camera.matrices.view;
+		if (!fixedFrustum)
 		{
-			uboScene.projection = camera.matrices.perspective;
-			uboScene.modelview = camera.matrices.view;
-			if (!fixedFrustum)
-			{
-				uboScene.cameraPos = glm::vec4(camera.position, 1.0f) * -1.0f;
-				frustum.update(uboScene.projection * uboScene.modelview);
-				memcpy(uboScene.frustumPlanes, frustum.planes.data(), sizeof(glm::vec4) * 6);
-			}
+			uboScene.cameraPos = glm::vec4(camera.position, 1.0f) * -1.0f;
+			frustum.update(uboScene.projection * uboScene.modelview);
+			memcpy(uboScene.frustumPlanes, frustum.planes.data(), sizeof(glm::vec4) * 6);
 		}
-
 		memcpy(uniformData.scene.mapped, &uboScene, sizeof(uboScene));
+	}
+
+	void prepare()
+	{
+		VulkanExampleBase::prepare();
+		loadAssets();
+		prepareBuffers();
+		setupDescriptors();
+		preparePipelines();
+		prepareCompute();
+		buildCommandBuffers();
+		prepared = true;
 	}
 
 	void draw()
@@ -780,11 +775,11 @@ public:
 		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
 
 		// Wait on present and compute semaphores
-		std::array<VkPipelineStageFlags,2> stageFlags = {
+		std::array<VkPipelineStageFlags, 2> stageFlags = {
 			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 		};
-		std::array<VkSemaphore,2> waitSemaphores = {
+		std::array<VkSemaphore, 2> waitSemaphores = {
 			semaphores.presentComplete,						// Wait for presentation to finished
 			compute.semaphore								// Wait for compute to finish
 		};
@@ -802,44 +797,20 @@ public:
 		memcpy(&indirectStats, indirectDrawCountBuffer.mapped, sizeof(indirectStats));
 	}
 
-	void prepare()
-	{
-		VulkanExampleBase::prepare();
-		loadAssets();
-		prepareBuffers();
-		setupDescriptorSetLayout();
-		preparePipelines();
-		setupDescriptorPool();
-		setupDescriptorSet();
-		prepareCompute();
-		buildCommandBuffers();
-		prepared = true;
-	}
-
 	virtual void render()
 	{
 		if (!prepared)
 		{
 			return;
 		}
+		updateUniformBuffer();
 		draw();
-		if (camera.updated)
-		{
-			updateUniformBuffer(true);
-		}
-	}
-
-	virtual void viewChanged()
-	{
-		updateUniformBuffer(true);
 	}
 
 	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay)
 	{
 		if (overlay->header("Settings")) {
-			if (overlay->checkBox("Freeze frustum", &fixedFrustum)) {
-				updateUniformBuffer(true);
-			}
+			overlay->checkBox("Freeze frustum", &fixedFrustum);
 		}
 		if (overlay->header("Statistics")) {
 			overlay->text("Visible objects: %d", indirectStats.drawCount);

@@ -1,7 +1,7 @@
 /*
  * Vulkan Example - Passing vertex attributes using interleaved and separate buffers
- *
- * Copyright (C) 2022 by Sascha Willems - www.saschawillems.de
+ * 
+ * Copyright (C) 2022-2023 by Sascha Willems - www.saschawillems.de
  *
  * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
  */
@@ -17,8 +17,6 @@
 #include "tiny_gltf.h"
 
 #include "vulkanexamplebase.h"
-
-#define ENABLE_VALIDATION false
 
 struct PushConstBlock {
 	glm::mat4 nodeMatrix;
@@ -85,7 +83,6 @@ public:
 	} vertexAttributeBuffers;
 
 	// Buffers for the separate vertex attributes
-	// @todo: rename
 	struct SeparateVertexBuffers {
 		vks::Buffer pos, normal, uv, tangent;
 	} separateVertexBuffers;
@@ -139,6 +136,5 @@ public:
 	void loadSceneNode(const tinygltf::Node& inputNode, const tinygltf::Model& input, Node* parent);
 	void drawSceneNode(VkCommandBuffer commandBuffer, Node node);
 	virtual void render();
-	virtual void viewChanged();
 	virtual void OnUpdateUIOverlay(vks::UIOverlay* overlay);
 };

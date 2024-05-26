@@ -1,7 +1,7 @@
 /*
 * Vulkan Example - Multi threaded command buffer generation and rendering
 *
-* Copyright (C) 2016 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2016-2024 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -12,8 +12,6 @@
 #include "frustum.hpp"
 
 #include "VulkanglTFModel.h"
-
-#define ENABLE_VALIDATION false
 
 class VulkanExample : public VulkanExampleBase
 {
@@ -32,27 +30,25 @@ public:
 	} matrices;
 
 	struct {
-		VkPipeline phong;
-		VkPipeline starsphere;
+		VkPipeline phong{ VK_NULL_HANDLE };
+		VkPipeline starsphere{ VK_NULL_HANDLE };
 	} pipelines;
-
-	VkPipelineLayout pipelineLayout;
-
-	VkCommandBuffer primaryCommandBuffer;
+	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
+	VkCommandBuffer primaryCommandBuffer{ VK_NULL_HANDLE };
 
 	// Secondary scene command buffers used to store backdrop and user interface
 	struct SecondaryCommandBuffers {
-		VkCommandBuffer background;
-		VkCommandBuffer ui;
+		VkCommandBuffer background{ VK_NULL_HANDLE };
+		VkCommandBuffer ui{ VK_NULL_HANDLE };
 	} secondaryCommandBuffers;
 
 	// Number of animated objects to be renderer
 	// by using threads and secondary command buffers
-	uint32_t numObjectsPerThread;
+	uint32_t numObjectsPerThread{ 0 };
 
 	// Multi threaded stuff
 	// Max. number of concurrent threads
-	uint32_t numThreads;
+	uint32_t numThreads{ 0 };
 
 	// Use push constants to update shader
 	// parameters on a per-thread base
@@ -74,7 +70,7 @@ public:
 	};
 
 	struct ThreadData {
-		VkCommandPool commandPool;
+		VkCommandPool commandPool{ VK_NULL_HANDLE };
 		// One command buffer per render object
 		std::vector<VkCommandBuffer> commandBuffer;
 		// One push constant block per render object
@@ -88,14 +84,14 @@ public:
 
 	// Fence to wait for all command buffers to finish before
 	// presenting to the swap chain
-	VkFence renderFence = {};
+	VkFence renderFence{ VK_NULL_HANDLE };
 
 	// View frustum for culling invisible objects
 	vks::Frustum frustum;
 
 	std::default_random_engine rndEngine;
 
-	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
+	VulkanExample() : VulkanExampleBase()
 	{
 		title = "Multi threaded command buffer";
 		camera.type = Camera::CameraType::lookat;
@@ -118,19 +114,16 @@ public:
 
 	~VulkanExample()
 	{
-		// Clean up used Vulkan resources
-		// Note : Inherited destructor cleans up resources stored in base class
-		vkDestroyPipeline(device, pipelines.phong, nullptr);
-		vkDestroyPipeline(device, pipelines.starsphere, nullptr);
-
-		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-
-		for (auto& thread : threadData) {
-			vkFreeCommandBuffers(device, thread.commandPool, thread.commandBuffer.size(), thread.commandBuffer.data());
-			vkDestroyCommandPool(device, thread.commandPool, nullptr);
+		if (device) {
+			vkDestroyPipeline(device, pipelines.phong, nullptr);
+			vkDestroyPipeline(device, pipelines.starsphere, nullptr);
+			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+			for (auto& thread : threadData) {
+				vkFreeCommandBuffers(device, thread.commandPool, static_cast<uint32_t>(thread.commandBuffer.size()), thread.commandBuffer.data());
+				vkDestroyCommandPool(device, thread.commandPool, nullptr);
+			}
+			vkDestroyFence(device, renderFence, nullptr);
 		}
-
-		vkDestroyFence(device, renderFence, nullptr);
 	}
 
 	float rnd(float range)
@@ -159,7 +152,7 @@ public:
 
 		threadData.resize(numThreads);
 
-		float maxX = std::floor(std::sqrt(numThreads * numObjectsPerThread));
+		float maxX = static_cast<float>(std::floor(std::sqrt(numThreads * numObjectsPerThread)));
 		uint32_t posX = 0;
 		uint32_t posZ = 0;
 
@@ -179,7 +172,7 @@ public:
 				vks::initializers::commandBufferAllocateInfo(
 					thread->commandPool,
 					VK_COMMAND_BUFFER_LEVEL_SECONDARY,
-					thread->commandBuffer.size());
+					static_cast<uint32_t>(thread->commandBuffer.size()));
 			VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &secondaryCmdBufAllocateInfo, thread->commandBuffer.data()));
 
 			thread->pushConstBlock.resize(numObjectsPerThread);
@@ -395,12 +388,12 @@ public:
 		}
 
 		// Render ui last
-		if (UIOverlay.visible) {
+		if (ui.visible) {
 			commandBuffers.push_back(secondaryCommandBuffers.ui);
 		}
 
 		// Execute render commands from the secondary command buffer
-		vkCmdExecuteCommands(primaryCommandBuffer, commandBuffers.size(), commandBuffers.data());
+		vkCmdExecuteCommands(primaryCommandBuffer, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
 
 		vkCmdEndRenderPass(primaryCommandBuffer);
 
@@ -414,27 +407,18 @@ public:
 		models.starSphere.loadFromFile(getAssetPath() + "models/sphere.gltf", vulkanDevice, queue, glTFLoadingFlags);
 	}
 
-	void setupPipelineLayout()
-	{
-		VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
-			vks::initializers::pipelineLayoutCreateInfo(nullptr, 0);
-
-		// Push constants for model matrices
-		VkPushConstantRange pushConstantRange =
-			vks::initializers::pushConstantRange(
-				VK_SHADER_STAGE_VERTEX_BIT,
-				sizeof(ThreadPushConstantBlock),
-				0);
-
-		// Push constant ranges are part of the pipeline layout
-		pPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-		pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
-
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayout));
-	}
-
 	void preparePipelines()
 	{
+		// Layout
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(nullptr, 0);
+		// Push constants for model matrices
+		VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, sizeof(ThreadPushConstantBlock), 0);
+		// Push constant ranges are part of the pipeline layout
+		pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+		pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+
+		// Pipelines
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
 		VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
 		VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
@@ -454,7 +438,7 @@ public:
 		pipelineCI.pViewportState = &viewportState;
 		pipelineCI.pDepthStencilState = &depthStencilState;
 		pipelineCI.pDynamicState = &dynamicState;
-		pipelineCI.stageCount = shaderStages.size();
+		pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
 		pipelineCI.pStages = shaderStages.data();
 		pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::Color});
 
@@ -476,6 +460,19 @@ public:
 		matrices.projection = camera.matrices.perspective;
 		matrices.view = camera.matrices.view;
 		frustum.update(matrices.projection * matrices.view);
+	}
+
+	void prepare()
+	{
+		VulkanExampleBase::prepare();
+		// Create a fence for synchronization
+		VkFenceCreateInfo fenceCreateInfo = vks::initializers::fenceCreateInfo(VK_FENCE_CREATE_SIGNALED_BIT);
+		vkCreateFence(device, &fenceCreateInfo, nullptr, &renderFence);
+		loadAssets();
+		preparePipelines();
+		prepareMultiThreadedRenderer();
+		updateMatrices();
+		prepared = true;
 	}
 
 	void draw()
@@ -500,34 +497,12 @@ public:
 		VulkanExampleBase::submitFrame();
 	}
 
-	void prepare()
-	{
-		VulkanExampleBase::prepare();
-		// Create a fence for synchronization
-		VkFenceCreateInfo fenceCreateInfo = vks::initializers::fenceCreateInfo(VK_FENCE_CREATE_SIGNALED_BIT);
-		vkCreateFence(device, &fenceCreateInfo, nullptr, &renderFence);
-		loadAssets();
-		setupPipelineLayout();
-		preparePipelines();
-		prepareMultiThreadedRenderer();
-		updateMatrices();
-		prepared = true;
-	}
-
 	virtual void render()
 	{
 		if (!prepared)
 			return;
-		draw();
-		if (camera.updated)
-		{
-			updateMatrices();
-		}
-	}
-
-	virtual void viewChanged()
-	{
 		updateMatrices();
+		draw();
 	}
 
 	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay)

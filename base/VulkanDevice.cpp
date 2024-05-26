@@ -1,14 +1,14 @@
 /*
-* Vulkan device class
-*
-* Encapsulates a physical Vulkan device and its logical representation
-*
-* Copyright (C) by Sascha Willems - www.saschawillems.de
-*
-* This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
-*/
+ * Vulkan device class
+ * 
+ * Encapsulates a physical Vulkan device and its logical representation
+ *
+ * Copyright (C) 2016-2024 by Sascha Willems - www.saschawillems.de
+ *
+ * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
+ */
 
-#if (defined(VK_USE_PLATFORM_IOS_MVK) || defined(VK_USE_PLATFORM_MACOS_MVK))
+#if (defined(VK_USE_PLATFORM_IOS_MVK) || defined(VK_USE_PLATFORM_MACOS_MVK) || defined(VK_USE_PLATFORM_METAL_EXT))
 // SRS - Enable beta extensions and make VK_KHR_portability_subset visible
 #define VK_ENABLE_BETA_EXTENSIONS
 #endif
@@ -49,7 +49,7 @@ namespace vks
 			std::vector<VkExtensionProperties> extensions(extCount);
 			if (vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extCount, &extensions.front()) == VK_SUCCESS)
 			{
-				for (auto ext : extensions)
+				for (auto& ext : extensions)
 				{
 					supportedExtensions.push_back(ext.extensionName);
 				}
@@ -269,14 +269,7 @@ namespace vks
 			deviceCreateInfo.pNext = &physicalDeviceFeatures2;
 		}
 
-		// Enable the debug marker extension if it is present (likely meaning a debugging tool is present)
-		if (extensionSupported(VK_EXT_DEBUG_MARKER_EXTENSION_NAME))
-		{
-			deviceExtensions.push_back(VK_EXT_DEBUG_MARKER_EXTENSION_NAME);
-			enableDebugMarkers = true;
-		}
-
-#if (defined(VK_USE_PLATFORM_IOS_MVK) || defined(VK_USE_PLATFORM_MACOS_MVK)) && defined(VK_KHR_portability_subset)
+#if (defined(VK_USE_PLATFORM_IOS_MVK) || defined(VK_USE_PLATFORM_MACOS_MVK) || defined(VK_USE_PLATFORM_METAL_EXT)) && defined(VK_KHR_portability_subset)
 		// SRS - When running on iOS/macOS with MoltenVK and VK_KHR_portability_subset is defined and supported by the device, enable the extension
 		if (extensionSupported(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME))
 		{

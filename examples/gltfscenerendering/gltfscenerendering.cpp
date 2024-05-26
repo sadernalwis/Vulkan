@@ -1,7 +1,7 @@
 /*
 * Vulkan Example - Scene rendering
 *
-* Copyright (C) 2020-202- by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2020-2023 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 *
@@ -284,7 +284,7 @@ void VulkanglTFScene::draw(VkCommandBuffer commandBuffer, VkPipelineLayout pipel
 	Vulkan Example class
 */
 
-VulkanExample::VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
+VulkanExample::VulkanExample() : VulkanExampleBase()
 {
 	title = "glTF scene rendering";
 	camera.type = Camera::CameraType::firstperson;
@@ -296,10 +296,12 @@ VulkanExample::VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 
 VulkanExample::~VulkanExample()
 {
-	vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-	vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.matrices, nullptr);
-	vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.textures, nullptr);
-	shaderData.buffer.destroy();
+	if (device) {
+		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+		vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.matrices, nullptr);
+		vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.textures, nullptr);
+		shaderData.buffer.destroy();
+	}
 }
 
 void VulkanExample::getEnabledFeatures()
@@ -383,7 +385,7 @@ void VulkanExample::loadglTFFile(std::string filename)
 		}
 	}
 	else {
-		vks::tools::exitFatal("Could not open the glTF file.\n\nThe file is part of the additional asset pack.\n\nRun \"download_assets.py\" in the repository root to download the latest version.", -1);
+		vks::tools::exitFatal("Could not open the glTF file.\n\nMake sure the assets submodule has been checked out and is up-to-date.", -1);
 		return;
 	}
 
@@ -501,16 +503,6 @@ void VulkanExample::setupDescriptors()
 	descriptorSetLayoutCI.bindingCount = 2;
 	VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutCI, nullptr, &descriptorSetLayouts.textures));
 
-	// Pipeline layout using both descriptor sets (set 0 = matrices, set 1 = material)
-	std::array<VkDescriptorSetLayout, 2> setLayouts = { descriptorSetLayouts.matrices, descriptorSetLayouts.textures };
-	VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(setLayouts.data(), static_cast<uint32_t>(setLayouts.size()));
-	// We will use push constants to push the local matrices of a primitive to the vertex shader
-	VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4), 0);
-	// Push constant ranges are part of the pipeline layout
-	pipelineLayoutCI.pushConstantRangeCount = 1;
-	pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
-	VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
-
 	// Descriptor set for scene matrices
 	VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.matrices, 1);
 	VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
@@ -533,6 +525,18 @@ void VulkanExample::setupDescriptors()
 
 void VulkanExample::preparePipelines()
 {
+	// Layout
+	// Pipeline layout uses both descriptor sets (set 0 = matrices, set 1 = material)
+	std::array<VkDescriptorSetLayout, 2> setLayouts = { descriptorSetLayouts.matrices, descriptorSetLayouts.textures };
+	VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(setLayouts.data(), static_cast<uint32_t>(setLayouts.size()));
+	// We will use push constants to push the local matrices of a primitive to the vertex shader
+	VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4), 0);
+	// Push constant ranges are part of the pipeline layout
+	pipelineLayoutCI.pushConstantRangeCount = 1;
+	pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
+	VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
+
+	// Pipelines
 	VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
 	VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
 	VkPipelineColorBlendAttachmentState blendAttachmentStateCI = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
@@ -599,13 +603,8 @@ void VulkanExample::preparePipelines()
 
 void VulkanExample::prepareUniformBuffers()
 {
-	VK_CHECK_RESULT(vulkanDevice->createBuffer(
-		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-		&shaderData.buffer,
-		sizeof(shaderData.values)));
+	VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &shaderData.buffer, sizeof(shaderData.values)));
 	VK_CHECK_RESULT(shaderData.buffer.map());
-	updateUniformBuffers();
 }
 
 void VulkanExample::updateUniformBuffers()
@@ -629,15 +628,8 @@ void VulkanExample::prepare()
 
 void VulkanExample::render()
 {
-	renderFrame();
-	if (camera.updated) {
-		updateUniformBuffers();
-	}
-}
-
-void VulkanExample::viewChanged()
-{
 	updateUniformBuffers();
+	renderFrame();
 }
 
 void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)

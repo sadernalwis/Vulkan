@@ -5,7 +5,7 @@
 *
 * Relevant code parts are marked with [POI]
 *
-* Copyright (C) 2021 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2021-2024 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -148,7 +148,7 @@ public:
 			accelerationStructureGeometry.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
 			accelerationStructureGeometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
 			accelerationStructureGeometry.geometry.triangles.vertexData = vertexBufferDeviceAddress;
-			accelerationStructureGeometry.geometry.triangles.maxVertex = 3;
+			accelerationStructureGeometry.geometry.triangles.maxVertex = 2;
 			accelerationStructureGeometry.geometry.triangles.vertexStride = sizeof(Vertex);
 			accelerationStructureGeometry.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
 			accelerationStructureGeometry.geometry.triangles.indexData = indexBufferDeviceAddress;
@@ -468,7 +468,7 @@ public:
 		rayTracingPipelineCI.pStages = shaderStages.data();
 		rayTracingPipelineCI.groupCount = static_cast<uint32_t>(shaderGroups.size());
 		rayTracingPipelineCI.pGroups = shaderGroups.data();
-		rayTracingPipelineCI.maxPipelineRayRecursionDepth = 2;
+		rayTracingPipelineCI.maxPipelineRayRecursionDepth = std::min(uint32_t(2), rayTracingPipelineProperties.maxRayRecursionDepth);
 		rayTracingPipelineCI.layout = pipelineLayout;
 		VK_CHECK_RESULT(vkCreateRayTracingPipelinesKHR(device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &rayTracingPipelineCI, nullptr, &pipeline));
 	}

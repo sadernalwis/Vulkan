@@ -8,7 +8,7 @@
 * this example uses push descriptors to pass descriptor sets for per-model textures and matrices
 * at command buffer creation time.
 *
-* Copyright (C) 2018 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2018-2023 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -16,14 +16,12 @@
 #include "vulkanexamplebase.h"
 #include "VulkanglTFModel.h"
 
-#define ENABLE_VALIDATION false
-
 class VulkanExample : public VulkanExampleBase
 {
 public:
 	bool animate = true;
 
-	PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSetKHR;
+	PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSetKHR{ VK_NULL_HANDLE };
 	VkPhysicalDevicePushDescriptorPropertiesKHR pushDescriptorProps{};
 
 	struct Cube {
@@ -36,20 +34,17 @@ public:
 
 	vkglTF::Model model;
 
-	struct UniformBuffers {
-		vks::Buffer scene;
-	} uniformBuffers;
-
-	struct UboScene {
+	struct UniformData {
 		glm::mat4 projection;
 		glm::mat4 view;
-	} uboScene;
+	} uniformData;
+	vks::Buffer uniformBuffer;
 
-	VkPipeline pipeline;
-	VkPipelineLayout pipelineLayout;
-	VkDescriptorSetLayout descriptorSetLayout;
+	VkPipeline pipeline{ VK_NULL_HANDLE };
+	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
+	VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
 
-	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
+	VulkanExample() : VulkanExampleBase()
 	{
 		title = "Push descriptors";
 		camera.type = Camera::CameraType::lookat;
@@ -63,14 +58,16 @@ public:
 
 	~VulkanExample()
 	{
-		vkDestroyPipeline(device, pipeline, nullptr);
-		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-		for (auto cube : cubes) {
-			cube.uniformBuffer.destroy();
-			cube.texture.destroy();
+		if (device) {
+			vkDestroyPipeline(device, pipeline, nullptr);
+			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+			vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+			for (auto cube : cubes) {
+				cube.uniformBuffer.destroy();
+				cube.texture.destroy();
+			}
+			uniformBuffer.destroy();
 		}
-		uniformBuffers.scene.destroy();
 	}
 
 	virtual void getEnabledFeatures()
@@ -115,7 +112,7 @@ public:
 			model.bindBuffers(drawCmdBuffers[i]);
 
 			// Render two cubes using different descriptor sets using push descriptors
-			for (auto cube : cubes) {
+			for (const auto& cube : cubes) {
 
 				// Instead of preparing the descriptor sets up-front, using push descriptors we can set (push) them inside of a command buffer
 				// This allows a more dynamic approach without the need to create descriptor sets for each model
@@ -129,7 +126,7 @@ public:
 				writeDescriptorSets[0].dstBinding = 0;
 				writeDescriptorSets[0].descriptorCount = 1;
 				writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-				writeDescriptorSets[0].pBufferInfo = &uniformBuffers.scene.descriptor;
+				writeDescriptorSets[0].pBufferInfo = &uniformBuffer.descriptor;
 
 				// Model matrices
 				writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -184,12 +181,15 @@ public:
 		descriptorLayoutCI.pBindings = setLayoutBindings.data();
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayoutCI, nullptr, &descriptorSetLayout));
 
-		VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
 	}
 
 	void preparePipelines()
 	{
+		// Layout
+		VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
+
+		// Pipeline
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
 		VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
 		VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
@@ -198,7 +198,7 @@ public:
 		VkPipelineViewportStateCreateInfo viewportStateCI = vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
 		VkPipelineMultisampleStateCreateInfo multisampleStateCI = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT, 0);
 		const std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-		VkPipelineDynamicStateCreateInfo dynamicStateCI = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables.data(), static_cast<uint32_t>(dynamicStateEnables.size()),0);
+		VkPipelineDynamicStateCreateInfo dynamicStateCI = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
 		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
 
 		VkGraphicsPipelineCreateInfo pipelineCI  = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass, 0);
@@ -221,20 +221,12 @@ public:
 	void prepareUniformBuffers()
 	{
 		// Vertex shader scene uniform buffer block
-		VK_CHECK_RESULT(vulkanDevice->createBuffer(
-			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			&uniformBuffers.scene,
-			sizeof(UboScene)));
-		VK_CHECK_RESULT(uniformBuffers.scene.map());
+		VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &uniformBuffer, sizeof(UniformData)));
+		VK_CHECK_RESULT(uniformBuffer.map());
 
 		// Vertex shader cube model uniform buffer blocks
 		for (auto& cube : cubes) {
-			VK_CHECK_RESULT(vulkanDevice->createBuffer(
-				VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-				&cube.uniformBuffer,
-				sizeof(glm::mat4)));
+			VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &cube.uniformBuffer, sizeof(glm::mat4)));
 			VK_CHECK_RESULT(cube.uniformBuffer.map());
 		}
 
@@ -244,9 +236,9 @@ public:
 
 	void updateUniformBuffers()
 	{
-		uboScene.projection = camera.matrices.perspective;
-		uboScene.view = camera.matrices.view;
-		memcpy(uniformBuffers.scene.mapped, &uboScene, sizeof(UboScene));
+		uniformData.projection = camera.matrices.perspective;
+		uniformData.view = camera.matrices.view;
+		memcpy(uniformBuffer.mapped, &uniformData, sizeof(uniformData));
 	}
 
 	void updateCubeUniformBuffers()
@@ -267,18 +259,9 @@ public:
 			if (cubes[0].rotation.x > 360.0f)
 				cubes[0].rotation.x -= 360.0f;
 			cubes[1].rotation.y += 2.0f * frameTimer;
-			if (cubes[1].rotation.x > 360.0f)
-				cubes[1].rotation.x -= 360.0f;
+			if (cubes[1].rotation.y > 360.0f)
+				cubes[1].rotation.y -= 360.0f;
 		}
-	}
-
-	void draw()
-	{
-		VulkanExampleBase::prepareFrame();
-		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
-		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
-		VulkanExampleBase::submitFrame();
 	}
 
 	void prepare()
@@ -318,28 +301,24 @@ public:
 		prepared = true;
 	}
 
+	void draw()
+	{
+		VulkanExampleBase::prepareFrame();
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
+		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+		VulkanExampleBase::submitFrame();
+	}
+
 	virtual void render()
 	{
 		if (!prepared)
 			return;
-		draw();
+		updateUniformBuffers();
 		if (animate && !paused) {
-			cubes[0].rotation.x += 2.5f * frameTimer;
-			if (cubes[0].rotation.x > 360.0f)
-				cubes[0].rotation.x -= 360.0f;
-			cubes[1].rotation.y += 2.0f * frameTimer;
-			if (cubes[1].rotation.x > 360.0f)
-				cubes[1].rotation.x -= 360.0f;
 			updateCubeUniformBuffers();
 		}
-		if (camera.updated) {
-			updateUniformBuffers();
-		}
-	}
-
-	virtual void viewChanged()
-	{
-		updateUniformBuffers();
+		draw();
 	}
 
 	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay)

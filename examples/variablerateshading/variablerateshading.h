@@ -1,7 +1,7 @@
 /*
 * Vulkan Example - Variable rate shading
 *
-* Copyright (C) 2020 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2020-2023 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -9,15 +9,13 @@
 #include "vulkanexamplebase.h"
 #include "VulkanglTFModel.h"
 
-#define ENABLE_VALIDATION false
-
 class VulkanExample : public VulkanExampleBase
 {
 public:
 	vkglTF::Model scene;
 
 	struct ShadingRateImage {
-		VkImage image;
+		VkImage image{ VK_NULL_HANDLE };
 		VkDeviceMemory memory;
 		VkImageView view;
 	} shadingRateImage;
@@ -40,32 +38,33 @@ public:
 	struct Pipelines {
 		VkPipeline opaque;
 		VkPipeline masked;
-	};
-
-	Pipelines basePipelines;
-	Pipelines shadingRatePipelines;
+	} pipelines;
 
 	VkPipelineLayout pipelineLayout;
 	VkDescriptorSet descriptorSet;
 	VkDescriptorSetLayout descriptorSetLayout;
 
-	VkPhysicalDeviceShadingRateImagePropertiesNV physicalDeviceShadingRateImagePropertiesNV{};
-	VkPhysicalDeviceShadingRateImageFeaturesNV enabledPhysicalDeviceShadingRateImageFeaturesNV{};
-	PFN_vkCmdBindShadingRateImageNV vkCmdBindShadingRateImageNV;
+	VkPhysicalDeviceFragmentShadingRatePropertiesKHR physicalDeviceShadingRateImageProperties{};
+	VkPhysicalDeviceFragmentShadingRateFeaturesKHR enabledPhysicalDeviceShadingRateImageFeaturesKHR{};
+
+	PFN_vkGetPhysicalDeviceFragmentShadingRatesKHR vkGetPhysicalDeviceFragmentShadingRatesKHR{ nullptr };
+	PFN_vkCmdSetFragmentShadingRateKHR vkCmdSetFragmentShadingRateKHR{ nullptr };
+	PFN_vkCreateRenderPass2KHR vkCreateRenderPass2KHR{ nullptr };
 
 	VulkanExample();
 	~VulkanExample();
-	virtual void getEnabledFeatures();
+	virtual void getEnabledFeatures() override;
 	void handleResize();
-	void buildCommandBuffers();
-	void loadglTFFile(std::string filename);
+	void buildCommandBuffers() override;
 	void loadAssets();
 	void prepareShadingRateImage();
 	void setupDescriptors();
 	void preparePipelines();
 	void prepareUniformBuffers();
 	void updateUniformBuffers();
-	void prepare();
-	virtual void render();
-	virtual void OnUpdateUIOverlay(vks::UIOverlay* overlay);
+	void prepare() override;
+	void setupFrameBuffer() override;
+	void setupRenderPass() override;
+	virtual void render() override;
+	virtual void OnUpdateUIOverlay(vks::UIOverlay* overlay) override;
 };

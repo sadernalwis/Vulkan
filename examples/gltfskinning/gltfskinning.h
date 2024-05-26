@@ -1,7 +1,7 @@
 /*
 * Vulkan Example - glTF skinned animation
 *
-* Copyright (C) 2020 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2020-2024 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -38,7 +38,6 @@
 #include "vulkanexamplebase.h"
 #include <vulkan/vulkan.h>
 
-#define ENABLE_VALIDATION false
 
 // Contains everything required to render a glTF model in Vulkan
 // This class is heavily simplified (compared to glTF's feature set) but retains the basic glTF structure
@@ -203,20 +202,20 @@ class VulkanExample : public VulkanExampleBase
 		} values;
 	} shaderData;
 
-	VkPipelineLayout pipelineLayout;
+	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
 	struct Pipelines
 	{
-		VkPipeline solid;
-		VkPipeline wireframe = VK_NULL_HANDLE;
+		VkPipeline solid{ VK_NULL_HANDLE };
+		VkPipeline wireframe{ VK_NULL_HANDLE };
 	} pipelines;
 
 	struct DescriptorSetLayouts
 	{
-		VkDescriptorSetLayout matrices;
-		VkDescriptorSetLayout textures;
-		VkDescriptorSetLayout jointMatrices;
+		VkDescriptorSetLayout matrices{ VK_NULL_HANDLE };
+		VkDescriptorSetLayout textures{ VK_NULL_HANDLE };
+		VkDescriptorSetLayout jointMatrices{ VK_NULL_HANDLE };
 	} descriptorSetLayouts;
-	VkDescriptorSet descriptorSet;
+	VkDescriptorSet descriptorSet{ VK_NULL_HANDLE };
 
 	VulkanglTFModel glTFModel;
 
@@ -232,6 +231,5 @@ class VulkanExample : public VulkanExampleBase
 	void         updateUniformBuffers();
 	void         prepare();
 	virtual void render();
-	virtual void viewChanged();
 	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay);
 };
